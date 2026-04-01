@@ -40,7 +40,7 @@ class MainWindow(QMainWindow):
         self.thread_pool = QThreadPool.globalInstance()
         self.preview_request_id = 0
 
-        self.setWindowTitle("Film Scanner V3")
+        self.setWindowTitle("Film Scanner V4")
         self.resize(
             int(self.settings.get("window_width", 1280)),
             int(self.settings.get("window_height", 820))
@@ -157,6 +157,8 @@ class MainWindow(QMainWindow):
             black_point=float(self.settings.get("default_black_point", 0.0)),
             white_point=float(self.settings.get("default_white_point", 1.0)),
             sharpness=float(self.settings.get("default_sharpness", 0.25)),
+            preset_name=str(self.settings.get("default_preset_name", "Balanced")),
+            output_icc_profile=str(self.settings.get("default_output_icc_profile", "sRGB IEC61966-2.1")),
         )
 
     def current_job(self) -> ImageJob | None:
@@ -248,6 +250,8 @@ class MainWindow(QMainWindow):
             return
 
         self.controls.film_type.setCurrentText(job.film_type)
+        self.controls.preset_name.setCurrentText(job.preset_name)
+        self.controls.output_icc.setCurrentText(job.output_icc_profile)
         self.controls.auto_crop.setChecked(job.auto_crop_enabled)
         self.controls.include_border.setChecked(job.include_border)
         self.controls.exposure.setValue(int(job.exposure * 10))
@@ -268,6 +272,8 @@ class MainWindow(QMainWindow):
             return
 
         job.film_type = self.controls.film_type.currentText()
+        job.preset_name = self.controls.preset_name.currentText()
+        job.output_icc_profile = self.controls.output_icc.currentText()
         job.auto_crop_enabled = self.controls.auto_crop.isChecked()
         job.include_border = self.controls.include_border.isChecked()
         job.exposure = self.controls.exposure.value() / 10.0

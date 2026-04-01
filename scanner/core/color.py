@@ -1,8 +1,14 @@
 from __future__ import annotations
 import numpy as np
 
-def auto_balance(image: np.ndarray) -> np.ndarray:
+
+def auto_balance(image: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
     flat = image.reshape(-1, 3)
+    if mask is not None and mask.shape[:2] == image.shape[:2] and np.any(mask):
+        flat = image[mask]
+
+    if flat.shape[0] < 64:
+        return image
 
     lo = np.percentile(flat, 2, axis=0)
     hi = np.percentile(flat, 98, axis=0)
@@ -11,12 +17,13 @@ def auto_balance(image: np.ndarray) -> np.ndarray:
     norm = (image - lo.reshape(1, 1, 3)) / span.reshape(1, 1, 3)
     norm = np.clip(norm, 0.0, 1.0)
 
-    means = np.mean(norm.reshape(-1, 3), axis=0)
+    means = np.mean(norm[mask], axis=0) if mask is not None and np.any(mask) else np.mean(norm.reshape(-1, 3), axis=0)
     target = np.mean(means)
     gains = target / np.maximum(means, 1e-5)
 
     out = norm * gains.reshape(1, 1, 3)
     return np.clip(out, 0.0, 1.0)
+
 
 def apply_gray_picker_balance(image: np.ndarray, point: tuple[int, int] | None) -> np.ndarray:
     if point is None:
@@ -42,6 +49,7 @@ def apply_gray_picker_balance(image: np.ndarray, point: tuple[int, int] | None) 
     out = image * gains.reshape(1, 1, 3)
     return np.clip(out, 0.0, 1.0)
 
+
 def apply_temp_tint(image: np.ndarray, temp: float = 0.0, tint: float = 0.0) -> np.ndarray:
     gains = np.array([
         1.0 + temp * 0.12,
@@ -51,6 +59,7 @@ def apply_temp_tint(image: np.ndarray, temp: float = 0.0, tint: float = 0.0) -> 
 
     out = image * gains.reshape(1, 1, 3)
     return np.clip(out, 0.0, 1.0)
+
 
 def adjust_saturation(image: np.ndarray, saturation: float = 0.0) -> np.ndarray:
     gray = np.mean(image, axis=2, keepdims=True)

@@ -8,13 +8,9 @@ def adjust_exposure(image: np.ndarray, exposure: float = 0.0) -> np.ndarray:
 
 
 def normalize_exposure_midtone(image: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
-    """
-    Auto-normalize exposure by anchoring the image median/midtone luminance near 0.5.
-    This gives a more stable starting point than only relying on manual exposure.
-    """
     gray = np.dot(image[..., :3], [0.299, 0.587, 0.114])
 
-    if mask is not None:
+    if mask is not None and mask.shape == gray.shape and np.any(mask):
         valid = gray[mask]
     else:
         valid = gray.reshape(-1)
@@ -42,16 +38,6 @@ def adjust_contrast(image: np.ndarray, contrast: float = 0.0) -> np.ndarray:
     return np.clip(out, 0.0, 1.0)
 
 
-def apply_filmic_contrast(image: np.ndarray) -> np.ndarray:
-    """
-    Gentle contrast finish for a cleaner default look.
-    Keeps things restrained so the app feels dependable, not overcooked.
-    """
-    image = np.power(np.clip(image, 0.0, 1.0), 0.95)
-    image = image * image * (3.0 - 2.0 * image)
-    return np.clip(image, 0.0, 1.0)
-
-
 def soft_highlight_rolloff(image: np.ndarray, strength: float = 0.15) -> np.ndarray:
     if strength <= 0:
         return image
@@ -64,10 +50,6 @@ def soft_highlight_rolloff(image: np.ndarray, strength: float = 0.15) -> np.ndar
 
 
 def protect_extremes(image: np.ndarray) -> np.ndarray:
-    """
-    Slightly pull extreme shadows/highlights toward luminance to reduce
-    weird color bias without flattening the entire image.
-    """
     gray = np.dot(image[..., :3], [0.299, 0.587, 0.114])
 
     shadow_mask = gray < 0.1
@@ -86,3 +68,9 @@ def protect_extremes(image: np.ndarray) -> np.ndarray:
         )
 
     return np.clip(out, 0.0, 1.0)
+
+
+def apply_filmic_contrast(image: np.ndarray) -> np.ndarray:
+    image = np.power(np.clip(image, 0.0, 1.0), 0.95)
+    image = image * image * (3.0 - 2.0 * image)
+    return np.clip(image, 0.0, 1.0)

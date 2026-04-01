@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 NormalizedCropRect = Tuple[float, float, float, float]
 Point = Tuple[float, float]
 
+
 @dataclass
 class ImageJob:
     source_path: str
@@ -30,6 +31,7 @@ class ImageJob:
 
     gray_pick_normalized: Optional[Point] = None
     preset_name: str = "Balanced"
+    output_icc_profile: str = "sRGB IEC61966-2.1"
 
     def display_name(self) -> str:
         return self.source_path.split("\\")[-1].split("/")[-1]

@@ -6,6 +6,9 @@ from PySide6.QtWidgets import (
     QCheckBox, QGroupBox, QHBoxLayout
 )
 
+from scanner.core.negative import list_negative_presets
+
+
 class FilmControls(QWidget):
     changed = Signal()
     export_clicked = Signal()
@@ -29,6 +32,18 @@ class FilmControls(QWidget):
         self.film_type.addItems(["color_negative", "bw_negative", "slide_positive"])
         self.film_type.currentIndexChanged.connect(lambda _=None: self.changed.emit())
         basic_layout.addWidget(self.film_type)
+
+        basic_layout.addWidget(QLabel("Stock / Preset"))
+        self.preset_name = QComboBox()
+        self.preset_name.addItems(list_negative_presets())
+        self.preset_name.currentIndexChanged.connect(lambda _=None: self.changed.emit())
+        basic_layout.addWidget(self.preset_name)
+
+        basic_layout.addWidget(QLabel("Output ICC"))
+        self.output_icc = QComboBox()
+        self.output_icc.addItems(["sRGB IEC61966-2.1"])
+        self.output_icc.currentIndexChanged.connect(lambda _=None: self.changed.emit())
+        basic_layout.addWidget(self.output_icc)
 
         self.auto_crop = QCheckBox("Auto Crop")
         self.auto_crop.setChecked(True)

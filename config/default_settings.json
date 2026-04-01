@@ -15,5 +15,7 @@
   "default_saturation": 0.0,
   "default_black_point": 0.0,
   "default_white_point": 1.0,
-  "default_sharpness": 0.25
+  "default_sharpness": 0.25,
+  "default_preset_name": "Balanced",
+  "default_output_icc_profile": "sRGB IEC61966-2.1"
 }
