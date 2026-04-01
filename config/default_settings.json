@@ -1,0 +1,19 @@
+{
+  "window_width": 1280,
+  "window_height": 820,
+  "last_open_dir": "",
+  "last_export_dir": "",
+  "theme": "dark",
+  "jpeg_quality": 95,
+  "default_film_type": "color_negative",
+  "default_auto_crop": true,
+  "default_include_border": false,
+  "default_exposure": 0.0,
+  "default_temp": 0.0,
+  "default_tint": 0.0,
+  "default_contrast": 0.0,
+  "default_saturation": 0.0,
+  "default_black_point": 0.0,
+  "default_white_point": 1.0,
+  "default_sharpness": 0.25
+}
