@@ -1,20 +1,56 @@
 from __future__ import annotations
 import numpy as np
 
+
 def adjust_exposure(image: np.ndarray, exposure: float = 0.0) -> np.ndarray:
     factor = 2.0 ** exposure
     return np.clip(image * factor, 0.0, 1.0)
+
+
+def normalize_exposure_midtone(image: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
+    """
+    Auto-normalize exposure by anchoring the image median/midtone luminance near 0.5.
+    This gives a more stable starting point than only relying on manual exposure.
+    """
+    gray = np.dot(image[..., :3], [0.299, 0.587, 0.114])
+
+    if mask is not None:
+        valid = gray[mask]
+    else:
+        valid = gray.reshape(-1)
+
+    if valid.size < 100:
+        return image
+
+    mid = np.percentile(valid, 50)
+    gain = 0.5 / (mid + 1e-6)
+    gain = np.clip(gain, 0.5, 2.5)
+
+    return np.clip(image * gain, 0.0, 1.0)
+
 
 def apply_levels(image: np.ndarray, black_point: float = 0.0, white_point: float = 1.0) -> np.ndarray:
     white_point = max(white_point, black_point + 1e-5)
     out = (image - black_point) / (white_point - black_point)
     return np.clip(out, 0.0, 1.0)
 
+
 def adjust_contrast(image: np.ndarray, contrast: float = 0.0) -> np.ndarray:
     factor = 1.0 + contrast
     midpoint = 0.5
     out = (image - midpoint) * factor + midpoint
     return np.clip(out, 0.0, 1.0)
+
+
+def apply_filmic_contrast(image: np.ndarray) -> np.ndarray:
+    """
+    Gentle contrast finish for a cleaner default look.
+    Keeps things restrained so the app feels dependable, not overcooked.
+    """
+    image = np.power(np.clip(image, 0.0, 1.0), 0.95)
+    image = image * image * (3.0 - 2.0 * image)
+    return np.clip(image, 0.0, 1.0)
+
 
 def soft_highlight_rolloff(image: np.ndarray, strength: float = 0.15) -> np.ndarray:
     if strength <= 0:
@@ -24,4 +60,29 @@ def soft_highlight_rolloff(image: np.ndarray, strength: float = 0.15) -> np.ndar
     mask = np.clip((x - 0.7) / 0.3, 0.0, 1.0)
     compressed = 0.7 + (x - 0.7) * (1.0 - strength * mask)
     out = np.where(x > 0.7, compressed, x)
+    return np.clip(out, 0.0, 1.0)
+
+
+def protect_extremes(image: np.ndarray) -> np.ndarray:
+    """
+    Slightly pull extreme shadows/highlights toward luminance to reduce
+    weird color bias without flattening the entire image.
+    """
+    gray = np.dot(image[..., :3], [0.299, 0.587, 0.114])
+
+    shadow_mask = gray < 0.1
+    highlight_mask = gray > 0.9
+
+    out = image.copy()
+
+    for c in range(3):
+        out[:, :, c][shadow_mask] = (
+            out[:, :, c][shadow_mask] * 0.7 +
+            gray[shadow_mask] * 0.3
+        )
+        out[:, :, c][highlight_mask] = (
+            out[:, :, c][highlight_mask] * 0.7 +
+            gray[highlight_mask] * 0.3
+        )
+
     return np.clip(out, 0.0, 1.0)
