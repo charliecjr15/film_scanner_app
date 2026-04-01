@@ -10,18 +10,13 @@ def adjust_exposure(image: np.ndarray, exposure: float = 0.0) -> np.ndarray:
 def normalize_exposure_midtone(image: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
     gray = np.dot(image[..., :3], [0.299, 0.587, 0.114])
 
-    if mask is not None and mask.shape == gray.shape and np.any(mask):
-        valid = gray[mask]
-    else:
-        valid = gray.reshape(-1)
-
+    valid = gray[mask] if mask is not None and mask.shape == gray.shape and np.any(mask) else gray.reshape(-1)
     if valid.size < 100:
         return image
 
     mid = np.percentile(valid, 50)
     gain = 0.5 / (mid + 1e-6)
     gain = np.clip(gain, 0.5, 2.5)
-
     return np.clip(image * gain, 0.0, 1.0)
 
 
@@ -45,8 +40,7 @@ def soft_highlight_rolloff(image: np.ndarray, strength: float = 0.15) -> np.ndar
     x = np.clip(image, 0.0, 1.0)
     mask = np.clip((x - 0.7) / 0.3, 0.0, 1.0)
     compressed = 0.7 + (x - 0.7) * (1.0 - strength * mask)
-    out = np.where(x > 0.7, compressed, x)
-    return np.clip(out, 0.0, 1.0)
+    return np.where(x > 0.7, compressed, x).clip(0.0, 1.0)
 
 
 def protect_extremes(image: np.ndarray) -> np.ndarray:
@@ -56,16 +50,9 @@ def protect_extremes(image: np.ndarray) -> np.ndarray:
     highlight_mask = gray > 0.9
 
     out = image.copy()
-
     for c in range(3):
-        out[:, :, c][shadow_mask] = (
-            out[:, :, c][shadow_mask] * 0.7 +
-            gray[shadow_mask] * 0.3
-        )
-        out[:, :, c][highlight_mask] = (
-            out[:, :, c][highlight_mask] * 0.7 +
-            gray[highlight_mask] * 0.3
-        )
+        out[:, :, c][shadow_mask] = out[:, :, c][shadow_mask] * 0.7 + gray[shadow_mask] * 0.3
+        out[:, :, c][highlight_mask] = out[:, :, c][highlight_mask] * 0.7 + gray[highlight_mask] * 0.3
 
     return np.clip(out, 0.0, 1.0)
 

@@ -3,10 +3,11 @@ from __future__ import annotations
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QComboBox, QSlider, QPushButton,
-    QCheckBox, QGroupBox, QHBoxLayout
+    QCheckBox, QGroupBox, QHBoxLayout, QLineEdit
 )
 
 from scanner.core.negative import list_negative_presets
+from scanner.core.color_management import list_output_profile_names
 
 
 class FilmControls(QWidget):
@@ -18,6 +19,7 @@ class FilmControls(QWidget):
     rotate_right_clicked = Signal()
     manual_crop_toggled = Signal(bool)
     gray_picker_toggled = Signal(bool)
+    browse_custom_icc_clicked = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -39,11 +41,21 @@ class FilmControls(QWidget):
         self.preset_name.currentIndexChanged.connect(lambda _=None: self.changed.emit())
         basic_layout.addWidget(self.preset_name)
 
-        basic_layout.addWidget(QLabel("Output ICC"))
-        self.output_icc = QComboBox()
-        self.output_icc.addItems(["sRGB IEC61966-2.1"])
-        self.output_icc.currentIndexChanged.connect(lambda _=None: self.changed.emit())
-        basic_layout.addWidget(self.output_icc)
+        basic_layout.addWidget(QLabel("Output Profile"))
+        self.output_profile = QComboBox()
+        self.output_profile.addItems(list_output_profile_names())
+        self.output_profile.currentIndexChanged.connect(lambda _=None: self.changed.emit())
+        basic_layout.addWidget(self.output_profile)
+
+        basic_layout.addWidget(QLabel("Custom Output ICC (optional)"))
+        row = QHBoxLayout()
+        self.custom_icc_path = QLineEdit()
+        self.custom_icc_path.textChanged.connect(lambda _=None: self.changed.emit())
+        self.browse_custom_icc_btn = QPushButton("Browse…")
+        self.browse_custom_icc_btn.clicked.connect(self.browse_custom_icc_clicked.emit)
+        row.addWidget(self.custom_icc_path, 1)
+        row.addWidget(self.browse_custom_icc_btn)
+        basic_layout.addLayout(row)
 
         self.auto_crop = QCheckBox("Auto Crop")
         self.auto_crop.setChecked(True)
@@ -62,29 +74,18 @@ class FilmControls(QWidget):
         self.gray_picker.stateChanged.connect(self._emit_gray_picker_toggled)
         basic_layout.addWidget(self.gray_picker)
 
-        basic_layout.addWidget(QLabel("Exposure"))
-        self.exposure = self._make_slider(-30, 30, 0, basic_layout)
-
-        basic_layout.addWidget(QLabel("Temperature"))
-        self.temp = self._make_slider(-30, 30, 0, basic_layout)
-
-        basic_layout.addWidget(QLabel("Tint"))
-        self.tint = self._make_slider(-30, 30, 0, basic_layout)
-
-        basic_layout.addWidget(QLabel("Contrast"))
-        self.contrast = self._make_slider(-25, 25, 0, basic_layout)
-
-        basic_layout.addWidget(QLabel("Saturation"))
-        self.saturation = self._make_slider(-25, 25, 0, basic_layout)
-
-        basic_layout.addWidget(QLabel("Black Point"))
-        self.black_point = self._make_slider(0, 30, 0, basic_layout)
-
-        basic_layout.addWidget(QLabel("White Point"))
-        self.white_point = self._make_slider(70, 100, 100, basic_layout)
-
-        basic_layout.addWidget(QLabel("Sharpness"))
-        self.sharpness = self._make_slider(0, 50, 25, basic_layout)
+        for label, attr, low, high, value in [
+            ("Exposure", "exposure", -30, 30, 0),
+            ("Temperature", "temp", -30, 30, 0),
+            ("Tint", "tint", -30, 30, 0),
+            ("Contrast", "contrast", -25, 25, 0),
+            ("Saturation", "saturation", -25, 25, 0),
+            ("Black Point", "black_point", 0, 30, 0),
+            ("White Point", "white_point", 70, 100, 100),
+            ("Sharpness", "sharpness", 0, 50, 25),
+        ]:
+            basic_layout.addWidget(QLabel(label))
+            setattr(self, attr, self._make_slider(low, high, value, basic_layout))
 
         root.addWidget(basic_box)
 
@@ -110,7 +111,6 @@ class FilmControls(QWidget):
         a_layout.addWidget(self.export_btn)
         a_layout.addWidget(self.export_all_btn)
         root.addWidget(actions_box)
-
         root.addStretch(1)
 
     def _make_slider(self, low: int, high: int, value: int, layout: QVBoxLayout) -> QSlider:

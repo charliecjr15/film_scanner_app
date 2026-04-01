@@ -50,6 +50,7 @@ def process_image(job: ImageJob, preview: bool = False) -> np.ndarray:
 
     crop_rect = resolve_crop_for_job(job, image)
     image = crop_image(image, crop_rect)
+
     content_mask = estimate_content_mask(image, crop_rect=None, include_border=job.include_border)
 
     if job.film_type == "color_negative":
@@ -70,6 +71,7 @@ def process_image(job: ImageJob, preview: bool = False) -> np.ndarray:
 
     gray_point = normalized_point_to_pixel(job.gray_pick_normalized, image.shape)
     image = apply_gray_picker_balance(image, gray_point)
+
     image = adjust_exposure(image, job.exposure)
     image = apply_temp_tint(image, job.temp, job.tint)
     image = apply_levels(image, job.black_point, job.white_point)

@@ -17,5 +17,6 @@
   "default_white_point": 1.0,
   "default_sharpness": 0.25,
   "default_preset_name": "Balanced",
-  "default_output_icc_profile": "sRGB IEC61966-2.1"
+  "default_output_profile_name": "sRGB IEC61966-2.1",
+  "default_custom_output_icc_path": ""
 }

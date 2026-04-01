@@ -7,7 +7,7 @@ from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
 from scanner.models.image_job import ImageJob
 from scanner.core.pipeline import process_image
-from scanner.core.image_io import save_image_jpeg, save_image_tiff, SRGB_PROFILE_BYTES
+from scanner.core.image_io import save_image_jpeg, save_image_tiff
 
 
 class ExportWorkerSignals(QObject):
@@ -41,14 +41,24 @@ class ExportWorker(QRunnable):
                 try:
                     image = process_image(job, preview=False)
                     stem = Path(job.source_path).stem + "_scan"
-                    icc_profile = SRGB_PROFILE_BYTES if job.output_icc_profile == "sRGB IEC61966-2.1" else SRGB_PROFILE_BYTES
 
                     if self.export_format == "tiff":
                         out_path = str(Path(self.export_dir) / f"{stem}.tiff")
-                        save_image_tiff(out_path, image, icc_profile=icc_profile)
+                        save_image_tiff(
+                            out_path,
+                            image,
+                            output_profile_name=job.output_profile_name,
+                            custom_output_icc_path=job.custom_output_icc_path or None,
+                        )
                     else:
                         out_path = str(Path(self.export_dir) / f"{stem}.jpg")
-                        save_image_jpeg(out_path, image, quality=self.jpeg_quality, icc_profile=icc_profile)
+                        save_image_jpeg(
+                            out_path,
+                            image,
+                            quality=self.jpeg_quality,
+                            output_profile_name=job.output_profile_name,
+                            custom_output_icc_path=job.custom_output_icc_path or None,
+                        )
 
                     exported += 1
                     self.signals.progress.emit(idx, len(self.jobs), Path(out_path).name)

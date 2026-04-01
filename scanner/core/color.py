@@ -3,9 +3,7 @@ import numpy as np
 
 
 def auto_balance(image: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
-    flat = image.reshape(-1, 3)
-    if mask is not None and mask.shape[:2] == image.shape[:2] and np.any(mask):
-        flat = image[mask]
+    flat = image[mask] if mask is not None and np.any(mask) else image.reshape(-1, 3)
 
     if flat.shape[0] < 64:
         return image
@@ -17,7 +15,8 @@ def auto_balance(image: np.ndarray, mask: np.ndarray | None = None) -> np.ndarra
     norm = (image - lo.reshape(1, 1, 3)) / span.reshape(1, 1, 3)
     norm = np.clip(norm, 0.0, 1.0)
 
-    means = np.mean(norm[mask], axis=0) if mask is not None and np.any(mask) else np.mean(norm.reshape(-1, 3), axis=0)
+    sample = norm[mask] if mask is not None and np.any(mask) else norm.reshape(-1, 3)
+    means = np.mean(sample, axis=0)
     target = np.mean(means)
     gains = target / np.maximum(means, 1e-5)
 

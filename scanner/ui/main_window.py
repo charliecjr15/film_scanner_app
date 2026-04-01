@@ -32,6 +32,7 @@ IMAGE_DIALOG_FILTER = (
     "All Files (*)"
 )
 
+
 class MainWindow(QMainWindow):
     def __init__(self, settings: SettingsManager) -> None:
         super().__init__()
@@ -40,12 +41,11 @@ class MainWindow(QMainWindow):
         self.thread_pool = QThreadPool.globalInstance()
         self.preview_request_id = 0
 
-        self.setWindowTitle("Film Scanner V4")
+        self.setWindowTitle("Film Scanner V5")
         self.resize(
             int(self.settings.get("window_width", 1280)),
             int(self.settings.get("window_height", 820))
         )
-
         self.setMinimumSize(980, 640)
 
         container = QWidget()
@@ -92,7 +92,7 @@ class MainWindow(QMainWindow):
         right_scroll.setWidgetResizable(True)
         right_scroll.setFrameShape(QScrollArea.NoFrame)
         right_scroll.setMinimumWidth(260)
-        right_scroll.setMaximumWidth(340)
+        right_scroll.setMaximumWidth(360)
         right_scroll.setWidget(right_content)
 
         splitter.addWidget(self.queue_panel)
@@ -102,7 +102,7 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
-        splitter.setSizes([200, 760, 300])
+        splitter.setSizes([200, 760, 320])
 
         self.status_label = QLabel("Ready")
         self.statusBar().addWidget(self.status_label)
@@ -128,6 +128,7 @@ class MainWindow(QMainWindow):
         self.controls.rotate_right_clicked.connect(self.rotate_right)
         self.controls.manual_crop_toggled.connect(self._on_manual_crop_toggled)
         self.controls.gray_picker_toggled.connect(self._on_gray_picker_toggled)
+        self.controls.browse_custom_icc_clicked.connect(self.browse_custom_icc)
 
         self.preview.crop_changed.connect(self.on_manual_crop_changed)
         self.preview.gray_point_chosen.connect(self.on_gray_point_chosen)
@@ -158,7 +159,8 @@ class MainWindow(QMainWindow):
             white_point=float(self.settings.get("default_white_point", 1.0)),
             sharpness=float(self.settings.get("default_sharpness", 0.25)),
             preset_name=str(self.settings.get("default_preset_name", "Balanced")),
-            output_icc_profile=str(self.settings.get("default_output_icc_profile", "sRGB IEC61966-2.1")),
+            output_profile_name=str(self.settings.get("default_output_profile_name", "sRGB IEC61966-2.1")),
+            custom_output_icc_path=str(self.settings.get("default_custom_output_icc_path", "")),
         )
 
     def current_job(self) -> ImageJob | None:
@@ -166,12 +168,7 @@ class MainWindow(QMainWindow):
 
     def add_files(self) -> None:
         start_dir = self.settings.get("last_open_dir", "")
-        paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Add Image Files",
-            start_dir,
-            IMAGE_DIALOG_FILTER
-        )
+        paths, _ = QFileDialog.getOpenFileNames(self, "Add Image Files", start_dir, IMAGE_DIALOG_FILTER)
         if not paths:
             return
 
@@ -194,10 +191,7 @@ class MainWindow(QMainWindow):
             return
 
         self.settings.set("last_open_dir", folder)
-        files = sorted([
-            str(p) for p in Path(folder).iterdir()
-            if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
-        ])
+        files = sorted(str(p) for p in Path(folder).iterdir() if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS)
 
         for path in files:
             self.state.queue.append(self._default_job(path))
@@ -251,7 +245,8 @@ class MainWindow(QMainWindow):
 
         self.controls.film_type.setCurrentText(job.film_type)
         self.controls.preset_name.setCurrentText(job.preset_name)
-        self.controls.output_icc.setCurrentText(job.output_icc_profile)
+        self.controls.output_profile.setCurrentText(job.output_profile_name)
+        self.controls.custom_icc_path.setText(job.custom_output_icc_path)
         self.controls.auto_crop.setChecked(job.auto_crop_enabled)
         self.controls.include_border.setChecked(job.include_border)
         self.controls.exposure.setValue(int(job.exposure * 10))
@@ -273,7 +268,8 @@ class MainWindow(QMainWindow):
 
         job.film_type = self.controls.film_type.currentText()
         job.preset_name = self.controls.preset_name.currentText()
-        job.output_icc_profile = self.controls.output_icc.currentText()
+        job.output_profile_name = self.controls.output_profile.currentText()
+        job.custom_output_icc_path = self.controls.custom_icc_path.text().strip()
         job.auto_crop_enabled = self.controls.auto_crop.isChecked()
         job.include_border = self.controls.include_border.isChecked()
         job.exposure = self.controls.exposure.value() / 10.0
@@ -284,6 +280,13 @@ class MainWindow(QMainWindow):
         job.black_point = self.controls.black_point.value() / 100.0
         job.white_point = self.controls.white_point.value() / 100.0
         job.sharpness = self.controls.sharpness.value() / 100.0
+
+    def browse_custom_icc(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Choose ICC Profile", "", "ICC Profiles (*.icc *.icm);;All Files (*)")
+        if not path:
+            return
+        self.controls.custom_icc_path.setText(path)
+        self.on_controls_changed()
 
     def on_controls_changed(self) -> None:
         if self.current_job() is None:

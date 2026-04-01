@@ -3,42 +3,57 @@ import numpy as np
 
 DEFAULT_FILM_BASE = np.array([0.82, 0.60, 0.42], dtype=np.float32)
 
+# Important honesty:
+# These are calibrated stock heuristics, not measured spectrophotometric lab datasets.
+# They provide a framework for stock-aware de-masking and density curves inside your app.
 NEGATIVE_PRESETS: dict[str, dict[str, np.ndarray | float]] = {
     "Balanced": {
-        "base_bias": np.array([1.00, 1.00, 1.00], dtype=np.float32),
-        "channel_gamma": np.array([1.00, 1.00, 1.00], dtype=np.float32),
+        "mask_bias": np.array([1.00, 1.00, 1.00], dtype=np.float32),
+        "scene_gamma": np.array([1.00, 1.00, 1.00], dtype=np.float32),
+        "density_to_scene": np.array([1.05, 1.00, 0.95], dtype=np.float32),
+        "toe_strength": 0.08,
+        "shoulder_strength": 0.08,
         "shadow_neutral": 0.18,
-        "contrast_hint": 1.00,
     },
     "Neutral Lab": {
-        "base_bias": np.array([0.98, 1.00, 1.03], dtype=np.float32),
-        "channel_gamma": np.array([1.00, 1.00, 1.00], dtype=np.float32),
+        "mask_bias": np.array([0.99, 1.00, 1.03], dtype=np.float32),
+        "scene_gamma": np.array([1.00, 1.00, 1.00], dtype=np.float32),
+        "density_to_scene": np.array([1.02, 1.00, 0.98], dtype=np.float32),
+        "toe_strength": 0.06,
+        "shoulder_strength": 0.07,
         "shadow_neutral": 0.12,
-        "contrast_hint": 0.96,
     },
     "Kodak Gold": {
-        "base_bias": np.array([1.03, 1.00, 0.94], dtype=np.float32),
-        "channel_gamma": np.array([0.98, 1.00, 1.04], dtype=np.float32),
+        "mask_bias": np.array([1.03, 1.00, 0.95], dtype=np.float32),
+        "scene_gamma": np.array([0.98, 1.00, 1.04], dtype=np.float32),
+        "density_to_scene": np.array([1.09, 1.00, 0.90], dtype=np.float32),
+        "toe_strength": 0.10,
+        "shoulder_strength": 0.10,
         "shadow_neutral": 0.16,
-        "contrast_hint": 1.05,
     },
     "Kodak Portra 400": {
-        "base_bias": np.array([1.01, 1.00, 0.97], dtype=np.float32),
-        "channel_gamma": np.array([0.99, 1.00, 1.02], dtype=np.float32),
+        "mask_bias": np.array([1.01, 1.00, 0.97], dtype=np.float32),
+        "scene_gamma": np.array([0.99, 1.00, 1.02], dtype=np.float32),
+        "density_to_scene": np.array([1.05, 1.00, 0.94], dtype=np.float32),
+        "toe_strength": 0.08,
+        "shoulder_strength": 0.09,
         "shadow_neutral": 0.14,
-        "contrast_hint": 0.98,
     },
     "Fuji 400H": {
-        "base_bias": np.array([0.97, 1.00, 1.04], dtype=np.float32),
-        "channel_gamma": np.array([1.02, 1.00, 0.98], dtype=np.float32),
-        "shadow_neutral": 0.14,
-        "contrast_hint": 0.95,
+        "mask_bias": np.array([0.97, 1.00, 1.05], dtype=np.float32),
+        "scene_gamma": np.array([1.02, 1.00, 0.98], dtype=np.float32),
+        "density_to_scene": np.array([0.96, 1.00, 1.06], dtype=np.float32),
+        "toe_strength": 0.07,
+        "shoulder_strength": 0.07,
+        "shadow_neutral": 0.13,
     },
     "CineStill 800T": {
-        "base_bias": np.array([0.94, 1.00, 1.08], dtype=np.float32),
-        "channel_gamma": np.array([1.04, 1.00, 0.96], dtype=np.float32),
+        "mask_bias": np.array([0.94, 1.00, 1.08], dtype=np.float32),
+        "scene_gamma": np.array([1.04, 1.00, 0.96], dtype=np.float32),
+        "density_to_scene": np.array([0.93, 1.00, 1.10], dtype=np.float32),
+        "toe_strength": 0.10,
+        "shoulder_strength": 0.08,
         "shadow_neutral": 0.22,
-        "contrast_hint": 1.02,
     },
 }
 
@@ -88,9 +103,47 @@ def estimate_film_base_from_borders(
         base = (lo * 0.35 + hi * 0.65).astype(np.float32)
 
     preset = get_negative_preset(preset_name)
-    base_bias = np.asarray(preset["base_bias"], dtype=np.float32)
-    base = base * base_bias
-    return np.clip(base, 0.05, 0.98)
+    mask_bias = np.asarray(preset["mask_bias"], dtype=np.float32)
+    return np.clip(base * mask_bias, 0.05, 0.98)
+
+
+def _pseudo_spectral_deorange(
+    image: np.ndarray,
+    film_base: np.ndarray,
+    preset_name: str | None = None,
+) -> np.ndarray:
+    preset = get_negative_preset(preset_name)
+    density_bias = np.asarray(preset["density_to_scene"], dtype=np.float32).reshape(1, 1, 3)
+
+    transmittance = image / np.maximum(film_base.reshape(1, 1, 3), 1e-5)
+    transmittance = np.clip(transmittance, 1e-5, 1.0)
+
+    # Density domain transform — pseudo-spectral approximation.
+    density = -np.log10(transmittance)
+    density = density * density_bias
+    density = np.clip(density, 0.0, 3.5)
+
+    scene = 10.0 ** (-density)
+    return np.clip(scene, 0.0, 1.0)
+
+
+def _apply_stock_sensitometric_curve(scene: np.ndarray, preset_name: str | None = None) -> np.ndarray:
+    preset = get_negative_preset(preset_name)
+    gamma = np.asarray(preset["scene_gamma"], dtype=np.float32).reshape(1, 1, 3)
+    toe_strength = float(preset["toe_strength"])
+    shoulder_strength = float(preset["shoulder_strength"])
+
+    out = np.power(np.clip(scene, 0.0, 1.0), gamma)
+
+    toe = np.clip((0.22 - out) / 0.22, 0.0, 1.0)
+    shoulder = np.clip((out - 0.75) / 0.25, 0.0, 1.0)
+
+    toe_lift = out + toe * toe_strength * (0.22 - out)
+    shoulder_soft = 0.75 + (out - 0.75) * (1.0 - shoulder_strength * shoulder)
+    out = np.where(out < 0.22, toe_lift, out)
+    out = np.where(out > 0.75, shoulder_soft, out)
+
+    return np.clip(out, 0.0, 1.0)
 
 
 def invert_color_negative(
@@ -99,17 +152,11 @@ def invert_color_negative(
     content_mask: np.ndarray | None = None,
     preset_name: str | None = None,
 ) -> np.ndarray:
-    preset = get_negative_preset(preset_name)
+    base = estimate_film_base_from_borders(image, content_mask=content_mask, preset_name=preset_name) if border_hint else DEFAULT_FILM_BASE.copy()
 
-    base = (
-        estimate_film_base_from_borders(image, content_mask=content_mask, preset_name=preset_name)
-        if border_hint else DEFAULT_FILM_BASE.copy()
-    )
-
-    normalized = image / np.maximum(base.reshape(1, 1, 3), 1e-5)
-    normalized = np.clip(normalized, 0.0, 1.75)
-
-    pos = 1.0 - np.clip(normalized, 0.0, 1.0)
+    # Pseudo-spectral orange-mask removal
+    scene = _pseudo_spectral_deorange(image, base, preset_name=preset_name)
+    pos = 1.0 - scene
 
     flat = pos[content_mask] if content_mask is not None and np.any(content_mask) else pos.reshape(-1, 3)
     if flat.shape[0] < 128:
@@ -121,13 +168,12 @@ def invert_color_negative(
     pos = (pos - lo.reshape(1, 1, 3)) / span.reshape(1, 1, 3)
     pos = np.clip(pos, 0.0, 1.0)
 
-    channel_gamma = np.asarray(preset["channel_gamma"], dtype=np.float32).reshape(1, 1, 3)
-    pos = np.power(np.clip(pos, 0.0, 1.0), channel_gamma)
+    pos = _apply_stock_sensitometric_curve(pos, preset_name=preset_name)
 
     luma = np.mean(pos, axis=2, keepdims=True)
     gray = np.repeat(luma, 3, axis=2)
     shadow_weight = np.clip((0.35 - luma) / 0.35, 0.0, 1.0)
-    shadow_neutral = float(preset["shadow_neutral"])
+    shadow_neutral = float(get_negative_preset(preset_name)["shadow_neutral"])
     pos = pos * (1.0 - shadow_weight * shadow_neutral) + gray * (shadow_weight * shadow_neutral)
 
     return np.clip(pos, 0.0, 1.0)
