@@ -1,30 +1,72 @@
 # Film Scanner App
 
-A desktop film scanning workflow app built with **Python** and **PySide6** for quickly turning camera-captured film frames into usable positive images.
+A desktop film scanning workflow app built with **Python** and **PySide6** for converting camera-captured film frames into usable positive images with a fast preview-to-export workflow.
 
-## What it does
+## Overview
 
-Film Scanner App is designed to make film conversion feel fast and dependable:
+Film Scanner App is designed around one simple loop:
 
-- import a film image in seconds
-- auto-correct to a usable starting point
-- make a few quick adjustments
-- compare the result in the preview
-- export confidently to JPEG or TIFF
+**Import → Auto-correct → Adjust → Compare → Export**
 
-The app currently supports:
+The goal is to make film conversion feel fast, dependable, and easy to use. The app is built for users who want a strong automatic starting point, then only a few manual tweaks before export.
 
-- **Color negative** conversion
-- **Black and white negative** conversion
-- **Slide positive** workflow
-- **Auto crop** and optional border inclusion
-- **Manual crop** adjustment
-- **Gray picker** for neutral balancing
-- **Exposure, temperature, tint, contrast, saturation** controls
-- **Black point / white point** controls
-- **Sharpening**
-- **Batch export**
-- **Histogram preview**
+## Current feature set
+
+### Core workflow
+- Import individual image files or entire folders
+- Queue-based workflow for multiple frames
+- Fast preview rendering
+- Export current image or batch export the full queue
+
+### Film support
+- Color negative conversion
+- Black and white negative conversion
+- Slide positive workflow
+
+### Auto-correction and processing
+- Automatic frame detection and auto crop
+- Optional border inclusion
+- Content-mask estimation for safer image statistics
+- Midtone-based exposure normalization
+- Automatic color balancing
+- Gray picker for neutral reference correction
+- Filmic contrast finish
+- Highlight and shadow protection
+- Sharpening
+
+### Stock-aware negative presets
+- Balanced
+- Neutral Lab
+- Kodak Gold
+- Kodak Portra 400
+- Fuji 400H
+- CineStill 800T
+
+### Color management
+- Standard images with embedded ICC profiles are converted into the working space
+- RAW files are developed into **sRGB**
+- Working pipeline is managed in **sRGB**
+- JPEG and TIFF exports embed an **sRGB ICC profile**
+
+### User controls
+- Film type
+- Stock / preset selection
+- Exposure
+- Temperature
+- Tint
+- Contrast
+- Saturation
+- Black point
+- White point
+- Sharpness
+- Rotation
+- Manual crop
+- Gray picker
+
+### Output
+- JPEG export
+- TIFF export
+- Embedded sRGB ICC profile in exported files
 
 ## Project structure
 
@@ -32,6 +74,7 @@ The app currently supports:
 film_scanner_app/
 ├── main.py
 ├── requirements.txt
+├── README.md
 ├── config/
 │   └── default_settings.json
 └── scanner/
@@ -66,18 +109,18 @@ film_scanner_app/
 
 - Python **3.11+** recommended
 - macOS, Windows, or Linux
-- A virtual environment is strongly recommended
+- A virtual environment is recommended
 
-## Install
+## Installation
 
-Clone the repo:
+Clone the repository:
 
 ```bash
 git clone https://github.com/charliecjr15/film_scanner_app.git
 cd film_scanner_app
 ```
 
-Create and activate a virtual environment:
+Create and activate a virtual environment.
 
 ### macOS / Linux
 
@@ -108,55 +151,98 @@ python main.py
 ## Basic workflow
 
 1. Add image files or a folder.
-2. Select the film type:
+2. Select the correct film type:
    - `color_negative`
    - `bw_negative`
    - `slide_positive`
-3. Let the app generate a preview.
-4. Fine-tune with the control panel.
-5. Export the current image or export the full queue.
+3. Choose a stock preset if you are working with color negative film.
+4. Let the app generate a preview.
+5. Fine-tune with the controls if needed.
+6. Use compare/preview tools in the interface.
+7. Export the current image or export the full queue.
 
-## V4 goals
+## Processing pipeline summary
 
-Version 4 focuses on a simple core workflow:
+The current processing flow is built around a practical, scanner-style workflow:
 
-**Import → Auto-correct → Adjust → Compare → Export**
+1. Read image into the working color space
+2. Apply transforms such as rotation and flips
+3. Detect frame and resolve crop
+4. Estimate content mask
+5. Convert film image:
+   - invert negative if needed
+   - apply stock-aware base estimation for color negatives
+6. Normalize exposure around midtones
+7. Auto-balance color
+8. Apply optional gray picker correction
+9. Apply user adjustments
+10. Apply highlight/shadow protection and filmic contrast
+11. Export with embedded output ICC profile
 
-The V4 direction is intended to improve:
+## Supported input formats
 
-- more dependable default color conversion
-- better midtone-based exposure normalization
-- cleaner highlight and shadow handling
-- fewer manual corrections per frame
-- faster preview-to-export workflow
-
-## Current export options
-
+Typical standard image support includes:
 - JPEG
+- PNG
 - TIFF
+
+RAW support depends on `rawpy` and the installed LibRaw support. Common RAW extensions may include:
+- DNG
+- NEF
+- CR2
+- CR3
+- ARW
+- RAF
+- RW2
+- ORF
+- PEF
+- SRW
+- and others defined in the project
+
+## V4 / V4.5 direction
+
+The current version focuses on:
+
+- faster preview-to-export workflow
+- stronger default auto-correction
+- safer content-aware statistics
+- better base estimation for color negatives
+- stock-aware starting looks
+- color-managed processing and output ICC embedding
 
 ## Known limitations
 
 This project is still evolving. Current limitations may include:
 
-- color conversion still depends on capture consistency
-- no stock-specific film profiles yet
-- no advanced orange-mask modeling yet
-- UI and auto-correction workflow are still being refined
+- stock presets are heuristic and not lab-calibrated
+- no true spectral orange-mask removal yet
+- no custom user-loaded ICC profile selection yet
+- no per-stock sensitometric calibration yet
+- results still depend heavily on capture consistency, lighting, and white balance discipline
 
 ## Roadmap ideas
 
-- stronger border-aware correction
-- improved film base estimation
-- better compare mode / split view
+Potential next upgrades:
+
+- selectable external ICC profiles
+- more advanced output color spaces
+- better compare tools / split view
 - saved presets
 - session save/load
-- more robust batch workflow
+- stronger batch workflow
+- more film-stock-specific tone and color packs
+- improved border-aware masking and crop logic
 
 ## Contributing
 
-This project is currently being actively shaped and refactored. If you want to contribute, open an issue or submit a pull request with a clear explanation of the change.
+This project is actively evolving. If you want to contribute:
+
+1. Fork the repo
+2. Create a feature branch
+3. Make your changes
+4. Commit clearly
+5. Open a pull request with a concise explanation
 
 ## License
 
-Add a license file if you want to make reuse terms explicit.
+Add a license file if you want to define reuse, modification, and distribution terms clearly.
