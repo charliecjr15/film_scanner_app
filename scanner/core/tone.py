@@ -14,10 +14,9 @@ def normalize_exposure_midtone(image: np.ndarray, scene_mask: np.ndarray | None 
     if valid.size < 100:
         return image
 
-    # Use median midtone only from scene
     mid = np.percentile(valid, 50)
     gain = 0.50 / (mid + 1e-6)
-    gain = np.clip(gain, 0.65, 2.0)
+    gain = np.clip(gain, 0.70, 1.80)
 
     return np.clip(image * gain, 0.0, 1.0)
 
@@ -56,37 +55,36 @@ def protect_extremes(image: np.ndarray) -> np.ndarray:
 
     for c in range(3):
         out[:, :, c][shadow_mask] = (
-            out[:, :, c][shadow_mask] * 0.75 +
-            gray[shadow_mask] * 0.25
+            out[:, :, c][shadow_mask] * 0.80 +
+            gray[shadow_mask] * 0.20
         )
         out[:, :, c][highlight_mask] = (
-            out[:, :, c][highlight_mask] * 0.75 +
-            gray[highlight_mask] * 0.25
+            out[:, :, c][highlight_mask] * 0.80 +
+            gray[highlight_mask] * 0.20
         )
 
     return np.clip(out, 0.0, 1.0)
 
 
-def suppress_catastrophic_edges(
+def suppress_outer_area(
     image: np.ndarray,
     border_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     """
-    Border areas should never dominate the frame visually.
-    Keep them subdued instead of trying to make them look photographic.
+    Border is never trusted. When shown, keep it visually quiet.
     """
     if border_mask is None or not np.any(border_mask):
         return image
 
     out = image.copy()
     gray = np.mean(out, axis=2, keepdims=True)
-    subdued = gray + (out - gray) * 0.35
-    subdued = soft_highlight_rolloff(subdued, 0.35)
+    subdued = gray + (out - gray) * 0.25
+    subdued = soft_highlight_rolloff(subdued, 0.40)
     out[border_mask] = subdued[border_mask]
     return np.clip(out, 0.0, 1.0)
 
 
 def apply_filmic_contrast(image: np.ndarray) -> np.ndarray:
-    image = np.power(np.clip(image, 0.0, 1.0), 0.96)
+    image = np.power(np.clip(image, 0.0, 1.0), 0.97)
     image = image * image * (3.0 - 2.0 * image)
     return np.clip(image, 0.0, 1.0)

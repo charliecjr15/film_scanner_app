@@ -41,37 +41,33 @@ def get_negative_preset(name: str | None) -> dict[str, np.ndarray | float]:
     return NEGATIVE_PRESETS.get(name, NEGATIVE_PRESETS["Balanced"])
 
 
-def estimate_film_base_from_borders(
+def estimate_film_base_from_edges(
     image: np.ndarray,
-    scene_mask: np.ndarray | None = None,
     preset_name: str | None = None,
 ) -> np.ndarray:
     """
-    Estimate base ONLY from non-scene pixels, but reject catastrophic bright junk.
+    Estimate film base from a thin edge band only.
+    This is separate from scene statistics, which use the center mask.
     """
     h, w, _ = image.shape
+    bh = max(6, h // 24)
+    bw = max(6, w // 24)
 
-    if scene_mask is not None and scene_mask.shape[:2] == image.shape[:2] and np.any(scene_mask):
-        border_mask = ~scene_mask
-        border_pixels = image[border_mask]
-    else:
-        bh = max(6, h // 24)
-        bw = max(6, w // 24)
-        border_pixels = np.concatenate([
-            image[:bh, :, :].reshape(-1, 3),
-            image[-bh:, :, :].reshape(-1, 3),
-            image[:, :bw, :].reshape(-1, 3),
-            image[:, -bw:, :].reshape(-1, 3),
-        ], axis=0)
+    edge_pixels = np.concatenate([
+        image[:bh, :, :].reshape(-1, 3),
+        image[-bh:, :, :].reshape(-1, 3),
+        image[:, :bw, :].reshape(-1, 3),
+        image[:, -bw:, :].reshape(-1, 3),
+    ], axis=0)
 
-    if border_pixels.size == 0:
+    if edge_pixels.size == 0:
         base = DEFAULT_FILM_BASE.copy()
     else:
-        # Reject catastrophic overbright junk from base estimation
-        luma = np.mean(border_pixels, axis=1)
-        usable = border_pixels[luma < 0.96]
+        # Reject extreme blown junk from base estimation
+        luma = np.mean(edge_pixels, axis=1)
+        usable = edge_pixels[luma < 0.96]
         if usable.shape[0] < 128:
-            usable = border_pixels
+            usable = edge_pixels
 
         lo = np.percentile(usable, 55, axis=0)
         hi = np.percentile(usable, 95, axis=0)
@@ -93,16 +89,12 @@ def invert_color_negative(
     preset = get_negative_preset(preset_name)
 
     base = (
-        estimate_film_base_from_borders(
-            image,
-            scene_mask=scene_mask,
-            preset_name=preset_name,
-        )
+        estimate_film_base_from_edges(image, preset_name=preset_name)
         if border_hint else DEFAULT_FILM_BASE.copy()
     )
 
     normalized = image / np.maximum(base.reshape(1, 1, 3), 1e-5)
-    normalized = np.clip(normalized, 0.0, 1.60)
+    normalized = np.clip(normalized, 0.0, 1.50)
 
     pos = 1.0 - np.clip(normalized, 0.0, 1.0)
 

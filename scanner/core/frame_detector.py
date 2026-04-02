@@ -51,22 +51,33 @@ def detect_film_frame(image: np.ndarray) -> Optional[CropRect]:
     return best
 
 
+def build_center_mask(
+    image: np.ndarray,
+    keep_fraction: float = 0.65,
+) -> np.ndarray:
+    """
+    Simple, stable center-weighted mask for all statistics.
+    This intentionally ignores borders/rebate/light leaks completely.
+    """
+    h, w = image.shape[:2]
+    keep_fraction = float(np.clip(keep_fraction, 0.30, 0.90))
+
+    margin_y = int(h * (1.0 - keep_fraction) / 2.0)
+    margin_x = int(w * (1.0 - keep_fraction) / 2.0)
+
+    mask = np.zeros((h, w), dtype=bool)
+    mask[margin_y:h - margin_y, margin_x:w - margin_x] = True
+    return mask
+
+
 def estimate_scene_mask(
     image: np.ndarray,
     crop_rect: CropRect | None = None,
-    ignore_left_frac: float = 0.14,
-    ignore_right_frac: float = 0.10,
-    ignore_top_frac: float = 0.08,
-    ignore_bottom_frac: float = 0.08,
+    keep_fraction: float = 0.65,
 ) -> np.ndarray:
     """
-    Build a strict scene-only mask.
-
-    This intentionally rejects:
-    - bright blown edge leaks
-    - rebate / film border
-    - low-detail contaminated edges
-    - edge-connected near-white slabs
+    Scene mask used for inversion / exposure / balance statistics.
+    We ignore borders completely and trust only the center area.
     """
     h, w = image.shape[:2]
 
@@ -74,101 +85,16 @@ def estimate_scene_mask(
         crop_rect = detect_film_frame(image)
 
     if crop_rect is None:
-        x0, y0, cw, ch = 0, 0, w, h
-    else:
-        x0, y0, cw, ch = crop_rect
+        return build_center_mask(image, keep_fraction=keep_fraction)
 
-    x1 = x0 + cw
-    y1 = y0 + ch
+    x, y, cw, ch = crop_rect
+    roi = image[y:y + ch, x:x + cw]
 
-    roi = image[y0:y1, x0:x1, :]
-    rh, rw = roi.shape[:2]
+    roi_mask = build_center_mask(roi, keep_fraction=keep_fraction)
 
-    if rh < 16 or rw < 16:
-        mask = np.zeros((h, w), dtype=bool)
-        mask[y0:y1, x0:x1] = True
-        return mask
-
-    gray = np.dot(roi[..., :3], [0.299, 0.587, 0.114]).astype(np.float32)
-    sat = (np.max(roi, axis=2) - np.min(roi, axis=2)).astype(np.float32)
-
-    # 1) Start with a strong center-safe mask
-    lx = int(rw * ignore_left_frac)
-    rx = int(rw * ignore_right_frac)
-    ty = int(rh * ignore_top_frac)
-    by = int(rh * ignore_bottom_frac)
-
-    center_safe = np.zeros((rh, rw), dtype=bool)
-    center_safe[ty:rh - by, lx:rw - rx] = True
-
-    # 2) Catastrophic leak rejection:
-    # near-white / low-detail / edge-connected zones
-    blur = cv2.GaussianBlur(gray, (5, 5), 0)
-    lap = cv2.Laplacian(blur, cv2.CV_32F, ksize=3)
-    detail = np.abs(lap)
-
-    bright = blur > 0.94
-    low_detail = detail < np.percentile(detail[center_safe], 35) if np.any(center_safe) else detail < np.percentile(detail, 35)
-    catastrophic = bright & low_detail
-
-    # Edge-connected catastrophic region
-    edge_seed = np.zeros((rh, rw), dtype=np.uint8)
-    edge_seed[0, :] = 1
-    edge_seed[-1, :] = 1
-    edge_seed[:, 0] = 1
-    edge_seed[:, -1] = 1
-
-    catastrophic_u8 = catastrophic.astype(np.uint8)
-    num_labels, labels = cv2.connectedComponents(catastrophic_u8)
-
-    edge_connected = np.zeros_like(catastrophic, dtype=bool)
-    for label in range(1, num_labels):
-        region = labels == label
-        if np.any(region & (edge_seed > 0)):
-            edge_connected |= region
-
-    # 3) Reject contamination band around catastrophic region
-    edge_connected_u8 = edge_connected.astype(np.uint8) * 255
-    contamination_band = cv2.dilate(edge_connected_u8, np.ones((21, 21), np.uint8), iterations=1) > 0
-
-    # 4) Reject likely border-like areas:
-    # low saturation + similar to edge brightness
-    band_y = max(2, rh // 20)
-    band_x = max(2, rw // 20)
-    border_samples = np.concatenate([
-        blur[:band_y, :].reshape(-1),
-        blur[-band_y:, :].reshape(-1),
-        blur[:, :band_x].reshape(-1),
-        blur[:, -band_x:].reshape(-1),
-    ])
-
-    border_med = float(np.median(border_samples)) if border_samples.size else float(np.median(blur))
-    border_std = float(np.std(border_samples)) if border_samples.size else 0.02
-
-    similar_to_border = np.abs(blur - border_med) < max(0.02, border_std * 0.7)
-    low_sat = sat < (np.percentile(sat[center_safe], 55) if np.any(center_safe) else np.percentile(sat, 55))
-    border_like = similar_to_border & low_sat
-
-    # 5) Final local mask
-    local_mask = center_safe & (~contamination_band) & (~border_like)
-
-    # Morphology cleanup
-    kernel = np.ones((5, 5), np.uint8)
-    local_mask = cv2.morphologyEx(local_mask.astype(np.uint8) * 255, cv2.MORPH_OPEN, kernel) > 0
-    local_mask = cv2.morphologyEx(local_mask.astype(np.uint8) * 255, cv2.MORPH_CLOSE, kernel) > 0
-
-    # 6) Fallback if too aggressive
-    min_keep = max(1024, (rh * rw) // 10)
-    if int(np.count_nonzero(local_mask)) < min_keep:
-        fallback = np.zeros((rh, rw), dtype=bool)
-        pad_y = max(4, rh // 10)
-        pad_x = max(4, rw // 10)
-        fallback[pad_y:rh - pad_y, pad_x:rw - pad_x] = True
-        local_mask = fallback
-
-    mask = np.zeros((h, w), dtype=bool)
-    mask[y0:y1, x0:x1] = local_mask
-    return mask
+    full_mask = np.zeros((h, w), dtype=bool)
+    full_mask[y:y + ch, x:x + cw] = roi_mask
+    return full_mask
 
 
 def estimate_border_mask(image: np.ndarray, scene_mask: np.ndarray) -> np.ndarray:
@@ -176,11 +102,4 @@ def estimate_border_mask(image: np.ndarray, scene_mask: np.ndarray) -> np.ndarra
     if scene_mask.shape != (h, w):
         raise ValueError("scene_mask shape mismatch")
 
-    border_mask = ~scene_mask
-    border_mask = cv2.morphologyEx(
-        border_mask.astype(np.uint8) * 255,
-        cv2.MORPH_OPEN,
-        np.ones((3, 3), np.uint8),
-    ) > 0
-
-    return border_mask
+    return ~scene_mask
