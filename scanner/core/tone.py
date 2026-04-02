@@ -7,16 +7,17 @@ def adjust_exposure(image: np.ndarray, exposure: float = 0.0) -> np.ndarray:
     return np.clip(image * factor, 0.0, 1.0)
 
 
-def normalize_exposure_midtone(image: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
+def normalize_exposure_midtone(image: np.ndarray, scene_mask: np.ndarray | None = None) -> np.ndarray:
     gray = np.dot(image[..., :3], [0.299, 0.587, 0.114])
 
-    valid = gray[mask] if mask is not None and mask.shape == gray.shape and np.any(mask) else gray.reshape(-1)
+    valid = gray[scene_mask] if scene_mask is not None and scene_mask.shape == gray.shape and np.any(scene_mask) else gray.reshape(-1)
     if valid.size < 100:
         return image
 
+    # Use median midtone only from scene
     mid = np.percentile(valid, 50)
-    gain = 0.5 / (mid + 1e-6)
-    gain = np.clip(gain, 0.5, 2.5)
+    gain = 0.50 / (mid + 1e-6)
+    gain = np.clip(gain, 0.65, 2.0)
 
     return np.clip(image * gain, 0.0, 1.0)
 
@@ -52,38 +53,40 @@ def protect_extremes(image: np.ndarray) -> np.ndarray:
     highlight_mask = gray > 0.9
 
     out = image.copy()
+
     for c in range(3):
         out[:, :, c][shadow_mask] = (
-            out[:, :, c][shadow_mask] * 0.7 +
-            gray[shadow_mask] * 0.3
+            out[:, :, c][shadow_mask] * 0.75 +
+            gray[shadow_mask] * 0.25
         )
         out[:, :, c][highlight_mask] = (
-            out[:, :, c][highlight_mask] * 0.7 +
-            gray[highlight_mask] * 0.3
+            out[:, :, c][highlight_mask] * 0.75 +
+            gray[highlight_mask] * 0.25
         )
 
     return np.clip(out, 0.0, 1.0)
 
 
-def render_border_soft(image: np.ndarray, border_mask: np.ndarray | None) -> np.ndarray:
+def suppress_catastrophic_edges(
+    image: np.ndarray,
+    border_mask: np.ndarray | None = None,
+) -> np.ndarray:
     """
-    Render border/rebate more gently so it doesn't compete with the image area.
+    Border areas should never dominate the frame visually.
+    Keep them subdued instead of trying to make them look photographic.
     """
     if border_mask is None or not np.any(border_mask):
         return image
 
     out = image.copy()
-
-    # Mild desaturation and softer highlight compression only on border area
     gray = np.mean(out, axis=2, keepdims=True)
-    softened = gray + (out - gray) * 0.55
-    softened = soft_highlight_rolloff(softened, 0.28)
-
-    out[border_mask] = softened[border_mask]
+    subdued = gray + (out - gray) * 0.35
+    subdued = soft_highlight_rolloff(subdued, 0.35)
+    out[border_mask] = subdued[border_mask]
     return np.clip(out, 0.0, 1.0)
 
 
 def apply_filmic_contrast(image: np.ndarray) -> np.ndarray:
-    image = np.power(np.clip(image, 0.0, 1.0), 0.95)
+    image = np.power(np.clip(image, 0.0, 1.0), 0.96)
     image = image * image * (3.0 - 2.0 * image)
     return np.clip(image, 0.0, 1.0)

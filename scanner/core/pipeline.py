@@ -9,11 +9,11 @@ from scanner.core.transforms import (
     crop_image,
     normalized_to_pixel_rect,
     pixel_to_normalized_rect,
-    normalized_point_to_pixel,
+    normalized_point_to_pixel
 )
 from scanner.core.frame_detector import (
     detect_film_frame,
-    estimate_content_mask,
+    estimate_scene_mask,
     estimate_border_mask,
 )
 from scanner.core.negative import invert_color_negative, invert_bw_negative
@@ -25,7 +25,7 @@ from scanner.core.tone import (
     adjust_contrast,
     soft_highlight_rolloff,
     protect_extremes,
-    render_border_soft,
+    suppress_catastrophic_edges,
     apply_filmic_contrast,
 )
 from scanner.core.sharpening import unsharp_mask
@@ -56,37 +56,32 @@ def process_image(job: ImageJob, preview: bool = False) -> np.ndarray:
     crop_rect = resolve_crop_for_job(job, image)
     image = crop_image(image, crop_rect)
 
-    # Build a strict safe-area mask for statistics
-    content_mask = estimate_content_mask(
-        image,
-        crop_rect=None,
-        include_border=False,
-    )
-    border_mask = estimate_border_mask(image, content_mask)
+    # Strict scene-only mask
+    scene_mask = estimate_scene_mask(image, crop_rect=None)
+    border_mask = estimate_border_mask(image, scene_mask)
 
-    # Film conversion should be driven by content-safe stats
+    # Film conversion driven ONLY by scene-safe stats
     if job.film_type == "color_negative":
         image = invert_color_negative(
             image,
             border_hint=True,
-            content_mask=content_mask,
+            scene_mask=scene_mask,
+            preset_name=job.preset_name,
         )
-        image = normalize_exposure_midtone(image, content_mask)
-        image = auto_balance(image, content_mask)
+        image = normalize_exposure_midtone(image, scene_mask)
+        image = auto_balance(image, scene_mask)
 
     elif job.film_type == "bw_negative":
         image = invert_bw_negative(image)
-        image = normalize_exposure_midtone(image, content_mask)
+        image = normalize_exposure_midtone(image, scene_mask)
 
     elif job.film_type == "slide_positive":
-        image = normalize_exposure_midtone(image, content_mask)
-        image = auto_balance(image, content_mask)
+        image = normalize_exposure_midtone(image, scene_mask)
+        image = auto_balance(image, scene_mask)
 
-    # Optional gray pick after primary rendering
     gray_point = normalized_point_to_pixel(job.gray_pick_normalized, image.shape)
     image = apply_gray_picker_balance(image, gray_point)
 
-    # User adjustments
     image = adjust_exposure(image, job.exposure)
     image = apply_temp_tint(image, job.temp, job.tint)
     image = apply_levels(image, job.black_point, job.white_point)
@@ -97,22 +92,19 @@ def process_image(job: ImageJob, preview: bool = False) -> np.ndarray:
     image = adjust_saturation(image, job.saturation)
     image = unsharp_mask(image, job.sharpness)
 
-    # Border handled separately at the end, only if user wants to keep it
+    # Border is visually suppressed at the end so it cannot dominate
     if job.include_border:
-        image = render_border_soft(image, border_mask)
+        image = suppress_catastrophic_edges(image, border_mask)
     else:
-        # If border is not requested, suppress contamination visually too
+        # If user does not want border, neutralize unsafe outer junk
         if np.any(border_mask):
-            neutral = np.mean(image, axis=2, keepdims=True).repeat(3, axis=2)
-            image[border_mask] = neutral[border_mask] * 0.98
+            gray = np.mean(image, axis=2, keepdims=True).repeat(3, axis=2)
+            image[border_mask] = gray[border_mask] * 0.98
 
     return np.clip(image, 0.0, 1.0)
 
 
-def process_image_and_histogram(
-    job: ImageJob,
-    preview: bool = False
-) -> tuple[np.ndarray, tuple[np.ndarray, np.ndarray, np.ndarray]]:
+def process_image_and_histogram(job: ImageJob, preview: bool = False) -> tuple[np.ndarray, tuple[np.ndarray, np.ndarray, np.ndarray]]:
     image = process_image(job, preview=preview)
     hist = compute_rgb_histograms(image)
     return image, hist

@@ -51,56 +51,90 @@ def detect_film_frame(image: np.ndarray) -> Optional[CropRect]:
     return best
 
 
-def estimate_content_mask(
+def estimate_scene_mask(
     image: np.ndarray,
     crop_rect: CropRect | None = None,
-    include_border: bool = False,
+    ignore_left_frac: float = 0.14,
+    ignore_right_frac: float = 0.10,
+    ignore_top_frac: float = 0.08,
+    ignore_bottom_frac: float = 0.08,
 ) -> np.ndarray:
     """
-    Return a conservative mask for content-only statistics.
-    This is intentionally aggressive: it rejects rebate, edge fog,
-    and bright contaminated borders.
+    Build a strict scene-only mask.
+
+    This intentionally rejects:
+    - bright blown edge leaks
+    - rebate / film border
+    - low-detail contaminated edges
+    - edge-connected near-white slabs
     """
     h, w = image.shape[:2]
 
     if crop_rect is None:
         crop_rect = detect_film_frame(image)
 
-    # Base ROI
     if crop_rect is None:
-        y_pad = max(6, h // 14)
-        x_pad = max(6, w // 14)
-        roi_mask = np.zeros((h, w), dtype=bool)
-        roi_mask[y_pad:h - y_pad, x_pad:w - x_pad] = True
+        x0, y0, cw, ch = 0, 0, w, h
     else:
-        x, y, cw, ch = crop_rect
-        roi_mask = np.zeros((h, w), dtype=bool)
-        roi_mask[y:y + ch, x:x + cw] = True
+        x0, y0, cw, ch = crop_rect
 
-    if include_border:
-        return roi_mask
-
-    ys, xs = np.where(roi_mask)
-    if ys.size == 0 or xs.size == 0:
-        return roi_mask
-
-    x0, x1 = xs.min(), xs.max() + 1
-    y0, y1 = ys.min(), ys.max() + 1
+    x1 = x0 + cw
+    y1 = y0 + ch
 
     roi = image[y0:y1, x0:x1, :]
+    rh, rw = roi.shape[:2]
+
+    if rh < 16 or rw < 16:
+        mask = np.zeros((h, w), dtype=bool)
+        mask[y0:y1, x0:x1] = True
+        return mask
+
     gray = np.dot(roi[..., :3], [0.299, 0.587, 0.114]).astype(np.float32)
+    sat = (np.max(roi, axis=2) - np.min(roi, axis=2)).astype(np.float32)
 
-    # Strong inward shrink to make a safe stats zone
-    inner_pad_y = max(4, roi.shape[0] // 12)
-    inner_pad_x = max(4, roi.shape[1] // 12)
-    safe = np.zeros_like(gray, dtype=bool)
-    safe[inner_pad_y:roi.shape[0] - inner_pad_y, inner_pad_x:roi.shape[1] - inner_pad_x] = True
+    # 1) Start with a strong center-safe mask
+    lx = int(rw * ignore_left_frac)
+    rx = int(rw * ignore_right_frac)
+    ty = int(rh * ignore_top_frac)
+    by = int(rh * ignore_bottom_frac)
 
-    # Detect edge contamination by comparing against border bands
+    center_safe = np.zeros((rh, rw), dtype=bool)
+    center_safe[ty:rh - by, lx:rw - rx] = True
+
+    # 2) Catastrophic leak rejection:
+    # near-white / low-detail / edge-connected zones
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
-    band_y = max(2, roi.shape[0] // 18)
-    band_x = max(2, roi.shape[1] // 18)
+    lap = cv2.Laplacian(blur, cv2.CV_32F, ksize=3)
+    detail = np.abs(lap)
 
+    bright = blur > 0.94
+    low_detail = detail < np.percentile(detail[center_safe], 35) if np.any(center_safe) else detail < np.percentile(detail, 35)
+    catastrophic = bright & low_detail
+
+    # Edge-connected catastrophic region
+    edge_seed = np.zeros((rh, rw), dtype=np.uint8)
+    edge_seed[0, :] = 1
+    edge_seed[-1, :] = 1
+    edge_seed[:, 0] = 1
+    edge_seed[:, -1] = 1
+
+    catastrophic_u8 = catastrophic.astype(np.uint8)
+    num_labels, labels = cv2.connectedComponents(catastrophic_u8)
+
+    edge_connected = np.zeros_like(catastrophic, dtype=bool)
+    for label in range(1, num_labels):
+        region = labels == label
+        if np.any(region & (edge_seed > 0)):
+            edge_connected |= region
+
+    # 3) Reject contamination band around catastrophic region
+    edge_connected_u8 = edge_connected.astype(np.uint8) * 255
+    contamination_band = cv2.dilate(edge_connected_u8, np.ones((21, 21), np.uint8), iterations=1) > 0
+
+    # 4) Reject likely border-like areas:
+    # low saturation + similar to edge brightness
+    band_y = max(2, rh // 20)
+    band_x = max(2, rw // 20)
     border_samples = np.concatenate([
         blur[:band_y, :].reshape(-1),
         blur[-band_y:, :].reshape(-1),
@@ -111,54 +145,38 @@ def estimate_content_mask(
     border_med = float(np.median(border_samples)) if border_samples.size else float(np.median(blur))
     border_std = float(np.std(border_samples)) if border_samples.size else 0.02
 
-    # Distance from border look
-    border_distance = np.abs(blur - border_med)
+    similar_to_border = np.abs(blur - border_med) < max(0.02, border_std * 0.7)
+    low_sat = sat < (np.percentile(sat[center_safe], 55) if np.any(center_safe) else np.percentile(sat, 55))
+    border_like = similar_to_border & low_sat
 
-    # Saturation anomaly catches purple / magenta / cyan edge leaks
-    sat = np.max(roi, axis=2) - np.min(roi, axis=2)
-    sat_blur = cv2.GaussianBlur(sat.astype(np.float32), (5, 5), 0)
+    # 5) Final local mask
+    local_mask = center_safe & (~contamination_band) & (~border_like)
 
-    # Reject pixels that look too similar to border contamination
-    active = (
-        (border_distance > max(0.025, border_std * 0.75)) |
-        (sat_blur < np.percentile(sat_blur[safe], 80) if np.any(safe) else 0.0)
-    )
-
-    # Keep only safe + content-like regions
-    mask_local = safe & active
-
-    # Morphological cleanup
+    # Morphology cleanup
     kernel = np.ones((5, 5), np.uint8)
-    mask_local = cv2.morphologyEx(mask_local.astype(np.uint8) * 255, cv2.MORPH_OPEN, kernel) > 0
-    mask_local = cv2.morphologyEx(mask_local.astype(np.uint8) * 255, cv2.MORPH_CLOSE, kernel) > 0
+    local_mask = cv2.morphologyEx(local_mask.astype(np.uint8) * 255, cv2.MORPH_OPEN, kernel) > 0
+    local_mask = cv2.morphologyEx(local_mask.astype(np.uint8) * 255, cv2.MORPH_CLOSE, kernel) > 0
 
-    # Fallback if we got too aggressive
-    min_keep = max(512, (roi.shape[0] * roi.shape[1]) // 8)
-    if int(np.count_nonzero(mask_local)) < min_keep:
-        mask_local[:] = False
-        fallback_pad_y = max(4, roi.shape[0] // 10)
-        fallback_pad_x = max(4, roi.shape[1] // 10)
-        mask_local[fallback_pad_y:roi.shape[0] - fallback_pad_y, fallback_pad_x:roi.shape[1] - fallback_pad_x] = True
+    # 6) Fallback if too aggressive
+    min_keep = max(1024, (rh * rw) // 10)
+    if int(np.count_nonzero(local_mask)) < min_keep:
+        fallback = np.zeros((rh, rw), dtype=bool)
+        pad_y = max(4, rh // 10)
+        pad_x = max(4, rw // 10)
+        fallback[pad_y:rh - pad_y, pad_x:rw - pad_x] = True
+        local_mask = fallback
 
-    full_mask = np.zeros((h, w), dtype=bool)
-    full_mask[y0:y1, x0:x1] = mask_local
-    return full_mask
+    mask = np.zeros((h, w), dtype=bool)
+    mask[y0:y1, x0:x1] = local_mask
+    return mask
 
 
-def estimate_border_mask(
-    image: np.ndarray,
-    content_mask: np.ndarray,
-) -> np.ndarray:
-    """
-    Border/rebate mask used for separate rendering when border inclusion is enabled.
-    """
+def estimate_border_mask(image: np.ndarray, scene_mask: np.ndarray) -> np.ndarray:
     h, w = image.shape[:2]
-    if content_mask.shape != (h, w):
-        raise ValueError("content_mask shape mismatch")
+    if scene_mask.shape != (h, w):
+        raise ValueError("scene_mask shape mismatch")
 
-    border_mask = ~content_mask
-
-    # Suppress tiny islands
+    border_mask = ~scene_mask
     border_mask = cv2.morphologyEx(
         border_mask.astype(np.uint8) * 255,
         cv2.MORPH_OPEN,

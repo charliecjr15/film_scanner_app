@@ -2,8 +2,8 @@ from __future__ import annotations
 import numpy as np
 
 
-def auto_balance(image: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
-    sample = image[mask] if mask is not None and np.any(mask) else image.reshape(-1, 3)
+def auto_balance(image: np.ndarray, scene_mask: np.ndarray | None = None) -> np.ndarray:
+    sample = image[scene_mask] if scene_mask is not None and np.any(scene_mask) else image.reshape(-1, 3)
 
     if sample.shape[0] < 64:
         return image
@@ -15,7 +15,7 @@ def auto_balance(image: np.ndarray, mask: np.ndarray | None = None) -> np.ndarra
     norm = (image - lo.reshape(1, 1, 3)) / span.reshape(1, 1, 3)
     norm = np.clip(norm, 0.0, 1.0)
 
-    stats_sample = norm[mask] if mask is not None and np.any(mask) else norm.reshape(-1, 3)
+    stats_sample = norm[scene_mask] if scene_mask is not None and np.any(scene_mask) else norm.reshape(-1, 3)
     means = np.mean(stats_sample, axis=0)
     target = np.mean(means)
     gains = target / np.maximum(means, 1e-5)
@@ -53,7 +53,7 @@ def apply_temp_tint(image: np.ndarray, temp: float = 0.0, tint: float = 0.0) -> 
     gains = np.array([
         1.0 + temp * 0.12,
         1.0 + tint * 0.08,
-        1.0 - temp * 0.12,
+        1.0 - temp * 0.12
     ], dtype=np.float32)
 
     out = image * gains.reshape(1, 1, 3)
