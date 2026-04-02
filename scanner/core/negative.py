@@ -3,10 +3,55 @@ import numpy as np
 
 DEFAULT_FILM_BASE = np.array([0.82, 0.60, 0.42], dtype=np.float32)
 
+# Keep preset API compatible with your UI.
+NEGATIVE_PRESETS: dict[str, dict[str, np.ndarray | float]] = {
+    "Balanced": {
+        "base_bias": np.array([1.00, 1.00, 1.00], dtype=np.float32),
+        "shadow_neutral": 0.18,
+        "contrast_hint": 1.00,
+    },
+    "Neutral Lab": {
+        "base_bias": np.array([0.98, 1.00, 1.03], dtype=np.float32),
+        "shadow_neutral": 0.12,
+        "contrast_hint": 0.96,
+    },
+    "Kodak Gold": {
+        "base_bias": np.array([1.03, 1.00, 0.95], dtype=np.float32),
+        "shadow_neutral": 0.16,
+        "contrast_hint": 1.05,
+    },
+    "Kodak Portra 400": {
+        "base_bias": np.array([1.01, 1.00, 0.97], dtype=np.float32),
+        "shadow_neutral": 0.14,
+        "contrast_hint": 0.98,
+    },
+    "Fuji 400H": {
+        "base_bias": np.array([0.97, 1.00, 1.05], dtype=np.float32),
+        "shadow_neutral": 0.13,
+        "contrast_hint": 0.95,
+    },
+    "CineStill 800T": {
+        "base_bias": np.array([0.94, 1.00, 1.08], dtype=np.float32),
+        "shadow_neutral": 0.22,
+        "contrast_hint": 1.02,
+    },
+}
+
+
+def list_negative_presets() -> list[str]:
+    return list(NEGATIVE_PRESETS.keys())
+
+
+def get_negative_preset(name: str | None) -> dict[str, np.ndarray | float]:
+    if not name:
+        return NEGATIVE_PRESETS["Balanced"]
+    return NEGATIVE_PRESETS.get(name, NEGATIVE_PRESETS["Balanced"])
+
 
 def estimate_film_base_from_borders(
     image: np.ndarray,
     content_mask: np.ndarray | None = None,
+    preset_name: str | None = None,
 ) -> np.ndarray:
     """
     Estimate film base from border/rebate only.
@@ -28,12 +73,17 @@ def estimate_film_base_from_borders(
         ], axis=0)
 
     if border_pixels.size == 0:
-        return DEFAULT_FILM_BASE.copy()
+        base = DEFAULT_FILM_BASE.copy()
+    else:
+        # Bias toward denser / cleaner border pixels
+        lo = np.percentile(border_pixels, 55, axis=0)
+        hi = np.percentile(border_pixels, 97, axis=0)
+        base = (lo * 0.30 + hi * 0.70).astype(np.float32)
 
-    # Bias toward denser / cleaner border pixels
-    lo = np.percentile(border_pixels, 55, axis=0)
-    hi = np.percentile(border_pixels, 97, axis=0)
-    base = (lo * 0.30 + hi * 0.70).astype(np.float32)
+    preset = get_negative_preset(preset_name)
+    base_bias = np.asarray(preset["base_bias"], dtype=np.float32)
+    base = base * base_bias
+
     return np.clip(base, 0.05, 0.98)
 
 
@@ -41,9 +91,16 @@ def invert_color_negative(
     image: np.ndarray,
     border_hint: bool = True,
     content_mask: np.ndarray | None = None,
+    preset_name: str | None = None,
 ) -> np.ndarray:
+    preset = get_negative_preset(preset_name)
+
     base = (
-        estimate_film_base_from_borders(image, content_mask=content_mask)
+        estimate_film_base_from_borders(
+            image,
+            content_mask=content_mask,
+            preset_name=preset_name,
+        )
         if border_hint else DEFAULT_FILM_BASE.copy()
     )
 
@@ -66,7 +123,8 @@ def invert_color_negative(
     luma = np.mean(pos, axis=2, keepdims=True)
     gray = np.repeat(luma, 3, axis=2)
     shadow_weight = np.clip((0.35 - luma) / 0.35, 0.0, 1.0)
-    pos = pos * (1.0 - shadow_weight * 0.18) + gray * (shadow_weight * 0.18)
+    shadow_neutral = float(preset["shadow_neutral"])
+    pos = pos * (1.0 - shadow_weight * shadow_neutral) + gray * (shadow_weight * shadow_neutral)
 
     return np.clip(pos, 0.0, 1.0)
 
