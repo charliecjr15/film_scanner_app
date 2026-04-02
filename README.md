@@ -243,6 +243,14 @@ This project is actively evolving. If you want to contribute:
 4. Commit clearly
 5. Open a pull request with a concise explanation
 
+EXAMPLES
+
+Film_Scanner_App
+<img width="512" height="345" alt="Screenshot 2026-04-02 at 10 11 58" src="https://github.com/user-attachments/assets/04183aed-0687-4ee9-aa3b-7ddc9b07ec3b" />
+
+Negitave Lab Pro
+<img width="312" height="471" alt="Screenshot 2026-04-02 at 10 07 31" src="https://github.com/user-attachments/assets/a4bfc611-064e-4328-9729-8b551f94c665" />
+
 ## License
 
 Add a license file if you want to define reuse, modification, and distribution terms clearly.
