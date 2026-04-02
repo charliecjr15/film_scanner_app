@@ -53,11 +53,11 @@ def detect_film_frame(image: np.ndarray) -> Optional[CropRect]:
 
 def build_center_mask(
     image: np.ndarray,
-    keep_fraction: float = 0.65,
+    keep_fraction: float = 0.60,
 ) -> np.ndarray:
     """
-    Simple, stable center-weighted mask for all statistics.
-    This intentionally ignores borders/rebate/light leaks completely.
+    Simple center-weighted mask for statistics.
+    Borders are intentionally ignored.
     """
     h, w = image.shape[:2]
     keep_fraction = float(np.clip(keep_fraction, 0.30, 0.90))
@@ -73,11 +73,11 @@ def build_center_mask(
 def estimate_scene_mask(
     image: np.ndarray,
     crop_rect: CropRect | None = None,
-    keep_fraction: float = 0.65,
+    keep_fraction: float = 0.60,
 ) -> np.ndarray:
     """
-    Scene mask used for inversion / exposure / balance statistics.
-    We ignore borders completely and trust only the center area.
+    Use only the center of the cropped image/frame for scene statistics.
+    This is intentionally simple and stable.
     """
     h, w = image.shape[:2]
 
@@ -101,5 +101,4 @@ def estimate_border_mask(image: np.ndarray, scene_mask: np.ndarray) -> np.ndarra
     h, w = image.shape[:2]
     if scene_mask.shape != (h, w):
         raise ValueError("scene_mask shape mismatch")
-
     return ~scene_mask

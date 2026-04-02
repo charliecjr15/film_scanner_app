@@ -53,7 +53,7 @@ def apply_temp_tint(image: np.ndarray, temp: float = 0.0, tint: float = 0.0) -> 
     gains = np.array([
         1.0 + temp * 0.12,
         1.0 + tint * 0.08,
-        1.0 - temp * 0.12
+        1.0 - temp * 0.12,
     ], dtype=np.float32)
 
     out = image * gains.reshape(1, 1, 3)

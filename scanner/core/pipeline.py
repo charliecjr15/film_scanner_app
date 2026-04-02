@@ -61,14 +61,14 @@ def process_image(job: ImageJob, preview: bool = False) -> np.ndarray:
     crop_rect = resolve_crop_for_job(job, image)
     image = crop_image(image, crop_rect)
 
-    # Scene-only stats: trust center, ignore edges
-    scene_mask = estimate_scene_mask(image, crop_rect=None, keep_fraction=0.65)
+    # Scene-first statistics
+    scene_mask = estimate_scene_mask(image, crop_rect=None, keep_fraction=0.60)
     border_mask = estimate_border_mask(image, scene_mask)
 
     if job.film_type == "color_negative":
         image = invert_color_negative(
             image,
-            border_hint=True,
+            border_hint=False,  # intentionally ignored now
             scene_mask=scene_mask,
             preset_name=job.preset_name,
         )
@@ -91,12 +91,12 @@ def process_image(job: ImageJob, preview: bool = False) -> np.ndarray:
     image = apply_levels(image, job.black_point, job.white_point)
     image = adjust_contrast(image, job.contrast)
     image = protect_extremes(image)
-    image = soft_highlight_rolloff(image, 0.12)
+    image = soft_highlight_rolloff(image, 0.10)
     image = apply_filmic_contrast(image)
     image = adjust_saturation(image, job.saturation)
     image = unsharp_mask(image, job.sharpness)
 
-    # Border never drives the image. If shown, keep it subdued.
+    # Border never drives the render
     if job.include_border:
         image = suppress_outer_area(image, border_mask)
     else:

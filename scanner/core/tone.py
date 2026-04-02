@@ -16,7 +16,7 @@ def normalize_exposure_midtone(image: np.ndarray, scene_mask: np.ndarray | None 
 
     mid = np.percentile(valid, 50)
     gain = 0.50 / (mid + 1e-6)
-    gain = np.clip(gain, 0.70, 1.80)
+    gain = np.clip(gain, 0.75, 1.60)
 
     return np.clip(image * gain, 0.0, 1.0)
 
@@ -34,7 +34,7 @@ def adjust_contrast(image: np.ndarray, contrast: float = 0.0) -> np.ndarray:
     return np.clip(out, 0.0, 1.0)
 
 
-def soft_highlight_rolloff(image: np.ndarray, strength: float = 0.15) -> np.ndarray:
+def soft_highlight_rolloff(image: np.ndarray, strength: float = 0.10) -> np.ndarray:
     if strength <= 0:
         return image
 
@@ -55,12 +55,12 @@ def protect_extremes(image: np.ndarray) -> np.ndarray:
 
     for c in range(3):
         out[:, :, c][shadow_mask] = (
-            out[:, :, c][shadow_mask] * 0.80 +
-            gray[shadow_mask] * 0.20
+            out[:, :, c][shadow_mask] * 0.82 +
+            gray[shadow_mask] * 0.18
         )
         out[:, :, c][highlight_mask] = (
-            out[:, :, c][highlight_mask] * 0.80 +
-            gray[highlight_mask] * 0.20
+            out[:, :, c][highlight_mask] * 0.82 +
+            gray[highlight_mask] * 0.18
         )
 
     return np.clip(out, 0.0, 1.0)
@@ -70,21 +70,18 @@ def suppress_outer_area(
     image: np.ndarray,
     border_mask: np.ndarray | None = None,
 ) -> np.ndarray:
-    """
-    Border is never trusted. When shown, keep it visually quiet.
-    """
     if border_mask is None or not np.any(border_mask):
         return image
 
     out = image.copy()
     gray = np.mean(out, axis=2, keepdims=True)
-    subdued = gray + (out - gray) * 0.25
-    subdued = soft_highlight_rolloff(subdued, 0.40)
+    subdued = gray + (out - gray) * 0.20
+    subdued = soft_highlight_rolloff(subdued, 0.45)
     out[border_mask] = subdued[border_mask]
     return np.clip(out, 0.0, 1.0)
 
 
 def apply_filmic_contrast(image: np.ndarray) -> np.ndarray:
-    image = np.power(np.clip(image, 0.0, 1.0), 0.97)
+    image = np.power(np.clip(image, 0.0, 1.0), 0.98)
     image = image * image * (3.0 - 2.0 * image)
     return np.clip(image, 0.0, 1.0)

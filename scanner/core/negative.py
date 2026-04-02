@@ -1,32 +1,30 @@
 from __future__ import annotations
 import numpy as np
 
-DEFAULT_FILM_BASE = np.array([0.82, 0.60, 0.42], dtype=np.float32)
-
 NEGATIVE_PRESETS: dict[str, dict[str, np.ndarray | float]] = {
     "Balanced": {
-        "base_bias": np.array([1.00, 1.00, 1.00], dtype=np.float32),
-        "shadow_neutral": 0.18,
-    },
-    "Neutral Lab": {
-        "base_bias": np.array([0.98, 1.00, 1.03], dtype=np.float32),
-        "shadow_neutral": 0.12,
-    },
-    "Kodak Gold": {
-        "base_bias": np.array([1.03, 1.00, 0.95], dtype=np.float32),
-        "shadow_neutral": 0.16,
-    },
-    "Kodak Portra 400": {
-        "base_bias": np.array([1.01, 1.00, 0.97], dtype=np.float32),
+        "channel_bias": np.array([1.00, 1.00, 1.00], dtype=np.float32),
         "shadow_neutral": 0.14,
     },
+    "Neutral Lab": {
+        "channel_bias": np.array([0.99, 1.00, 1.02], dtype=np.float32),
+        "shadow_neutral": 0.10,
+    },
+    "Kodak Gold": {
+        "channel_bias": np.array([1.03, 1.00, 0.96], dtype=np.float32),
+        "shadow_neutral": 0.15,
+    },
+    "Kodak Portra 400": {
+        "channel_bias": np.array([1.01, 1.00, 0.98], dtype=np.float32),
+        "shadow_neutral": 0.12,
+    },
     "Fuji 400H": {
-        "base_bias": np.array([0.97, 1.00, 1.05], dtype=np.float32),
-        "shadow_neutral": 0.13,
+        "channel_bias": np.array([0.98, 1.00, 1.03], dtype=np.float32),
+        "shadow_neutral": 0.12,
     },
     "CineStill 800T": {
-        "base_bias": np.array([0.94, 1.00, 1.08], dtype=np.float32),
-        "shadow_neutral": 0.22,
+        "channel_bias": np.array([0.95, 1.00, 1.08], dtype=np.float32),
+        "shadow_neutral": 0.18,
     },
 }
 
@@ -41,71 +39,60 @@ def get_negative_preset(name: str | None) -> dict[str, np.ndarray | float]:
     return NEGATIVE_PRESETS.get(name, NEGATIVE_PRESETS["Balanced"])
 
 
-def estimate_film_base_from_edges(
+def _robust_scene_channel_anchors(
     image: np.ndarray,
-    preset_name: str | None = None,
-) -> np.ndarray:
+    scene_mask: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """
-    Estimate film base from a thin edge band only.
-    This is separate from scene statistics, which use the center mask.
+    Derive inversion anchors from the scene center only.
+    This replaces edge-derived film base estimation.
     """
-    h, w, _ = image.shape
-    bh = max(6, h // 24)
-    bw = max(6, w // 24)
+    sample = image[scene_mask] if scene_mask is not None and np.any(scene_mask) else image.reshape(-1, 3)
 
-    edge_pixels = np.concatenate([
-        image[:bh, :, :].reshape(-1, 3),
-        image[-bh:, :, :].reshape(-1, 3),
-        image[:, :bw, :].reshape(-1, 3),
-        image[:, -bw:, :].reshape(-1, 3),
-    ], axis=0)
+    if sample.shape[0] < 256:
+        sample = image.reshape(-1, 3)
 
-    if edge_pixels.size == 0:
-        base = DEFAULT_FILM_BASE.copy()
-    else:
-        # Reject extreme blown junk from base estimation
-        luma = np.mean(edge_pixels, axis=1)
-        usable = edge_pixels[luma < 0.96]
-        if usable.shape[0] < 128:
-            usable = edge_pixels
+    lo = np.percentile(sample, 1.0, axis=0).astype(np.float32)
+    hi = np.percentile(sample, 99.0, axis=0).astype(np.float32)
 
-        lo = np.percentile(usable, 55, axis=0)
-        hi = np.percentile(usable, 95, axis=0)
-        base = (lo * 0.35 + hi * 0.65).astype(np.float32)
-
-    preset = get_negative_preset(preset_name)
-    base_bias = np.asarray(preset["base_bias"], dtype=np.float32)
-    base = base * base_bias
-
-    return np.clip(base, 0.05, 0.98)
+    span = np.maximum(hi - lo, 1e-5)
+    return lo, span
 
 
 def invert_color_negative(
     image: np.ndarray,
-    border_hint: bool = True,
+    border_hint: bool = True,  # kept for UI/API compatibility
     scene_mask: np.ndarray | None = None,
     preset_name: str | None = None,
 ) -> np.ndarray:
+    """
+    Scene-anchored inversion:
+    - derive per-channel anchors from center scene only
+    - normalize from scene percentiles
+    - invert
+    - apply gentle preset bias
+    - apply mild shadow neutralization
+    """
     preset = get_negative_preset(preset_name)
+    lo, span = _robust_scene_channel_anchors(image, scene_mask)
 
-    base = (
-        estimate_film_base_from_edges(image, preset_name=preset_name)
-        if border_hint else DEFAULT_FILM_BASE.copy()
-    )
+    norm = (image - lo.reshape(1, 1, 3)) / span.reshape(1, 1, 3)
+    norm = np.clip(norm, 0.0, 1.0)
 
-    normalized = image / np.maximum(base.reshape(1, 1, 3), 1e-5)
-    normalized = np.clip(normalized, 0.0, 1.50)
+    pos = 1.0 - norm
 
-    pos = 1.0 - np.clip(normalized, 0.0, 1.0)
+    channel_bias = np.asarray(preset["channel_bias"], dtype=np.float32).reshape(1, 1, 3)
+    pos = np.clip(pos * channel_bias, 0.0, 1.0)
 
+    # Re-normalize gently from scene only after preset bias
     sample = pos[scene_mask] if scene_mask is not None and np.any(scene_mask) else pos.reshape(-1, 3)
     if sample.shape[0] < 256:
         sample = pos.reshape(-1, 3)
 
-    lo = np.percentile(sample, 1.0, axis=0)
-    hi = np.percentile(sample, 99.0, axis=0)
-    span = np.maximum(hi - lo, 1e-5)
-    pos = (pos - lo.reshape(1, 1, 3)) / span.reshape(1, 1, 3)
+    lo2 = np.percentile(sample, 1.0, axis=0)
+    hi2 = np.percentile(sample, 99.0, axis=0)
+    span2 = np.maximum(hi2 - lo2, 1e-5)
+    pos = (pos - lo2.reshape(1, 1, 3)) / span2.reshape(1, 1, 3)
     pos = np.clip(pos, 0.0, 1.0)
 
     # Gentle shadow de-coloring
@@ -120,10 +107,10 @@ def invert_color_negative(
 
 def invert_bw_negative(image: np.ndarray) -> np.ndarray:
     gray = np.mean(image, axis=2, keepdims=True)
-    inv = 1.0 - gray
 
-    lo = np.percentile(inv, 1.0)
-    hi = np.percentile(inv, 99.0)
-    inv = (inv - lo) / max(hi - lo, 1e-5)
+    lo = np.percentile(gray, 1.0)
+    hi = np.percentile(gray, 99.0)
+    norm = (gray - lo) / max(hi - lo, 1e-5)
+    inv = 1.0 - np.clip(norm, 0.0, 1.0)
 
-    return np.repeat(np.clip(inv, 0.0, 1.0), 3, axis=2)
+    return np.repeat(inv, 3, axis=2).clip(0.0, 1.0)
