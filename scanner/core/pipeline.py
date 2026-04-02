@@ -14,7 +14,6 @@ from scanner.core.transforms import (
 from scanner.core.frame_detector import (
     detect_film_frame,
     estimate_scene_mask,
-    estimate_border_mask,
 )
 from scanner.core.negative import invert_color_negative, invert_bw_negative
 from scanner.core.color import (
@@ -30,7 +29,6 @@ from scanner.core.tone import (
     adjust_contrast,
     soft_highlight_rolloff,
     protect_extremes,
-    suppress_outer_area,
     apply_filmic_contrast,
 )
 from scanner.core.sharpening import unsharp_mask
@@ -61,14 +59,15 @@ def process_image(job: ImageJob, preview: bool = False) -> np.ndarray:
     crop_rect = resolve_crop_for_job(job, image)
     image = crop_image(image, crop_rect)
 
-    # Scene-first statistics
+    # IMPORTANT:
+    # scene_mask is for STATISTICS ONLY.
+    # It must not be used to visually suppress the outer image.
     scene_mask = estimate_scene_mask(image, crop_rect=None, keep_fraction=0.60)
-    border_mask = estimate_border_mask(image, scene_mask)
 
     if job.film_type == "color_negative":
         image = invert_color_negative(
             image,
-            border_hint=False,  # intentionally ignored now
+            border_hint=False,
             scene_mask=scene_mask,
             preset_name=job.preset_name,
         )
@@ -95,14 +94,6 @@ def process_image(job: ImageJob, preview: bool = False) -> np.ndarray:
     image = apply_filmic_contrast(image)
     image = adjust_saturation(image, job.saturation)
     image = unsharp_mask(image, job.sharpness)
-
-    # Border never drives the render
-    if job.include_border:
-        image = suppress_outer_area(image, border_mask)
-    else:
-        if np.any(border_mask):
-            gray = np.mean(image, axis=2, keepdims=True).repeat(3, axis=2)
-            image[border_mask] = gray[border_mask] * 0.98
 
     return np.clip(image, 0.0, 1.0)
 

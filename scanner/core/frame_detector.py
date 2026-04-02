@@ -55,10 +55,6 @@ def build_center_mask(
     image: np.ndarray,
     keep_fraction: float = 0.60,
 ) -> np.ndarray:
-    """
-    Simple center-weighted mask for statistics.
-    Borders are intentionally ignored.
-    """
     h, w = image.shape[:2]
     keep_fraction = float(np.clip(keep_fraction, 0.30, 0.90))
 
@@ -75,30 +71,18 @@ def estimate_scene_mask(
     crop_rect: CropRect | None = None,
     keep_fraction: float = 0.60,
 ) -> np.ndarray:
-    """
-    Use only the center of the cropped image/frame for scene statistics.
-    This is intentionally simple and stable.
-    """
-    h, w = image.shape[:2]
-
     if crop_rect is None:
         crop_rect = detect_film_frame(image)
+
+    h, w = image.shape[:2]
 
     if crop_rect is None:
         return build_center_mask(image, keep_fraction=keep_fraction)
 
     x, y, cw, ch = crop_rect
     roi = image[y:y + ch, x:x + cw]
-
     roi_mask = build_center_mask(roi, keep_fraction=keep_fraction)
 
     full_mask = np.zeros((h, w), dtype=bool)
     full_mask[y:y + ch, x:x + cw] = roi_mask
     return full_mask
-
-
-def estimate_border_mask(image: np.ndarray, scene_mask: np.ndarray) -> np.ndarray:
-    h, w = image.shape[:2]
-    if scene_mask.shape != (h, w):
-        raise ValueError("scene_mask shape mismatch")
-    return ~scene_mask
