@@ -1,90 +1,116 @@
 from __future__ import annotations
+
 import numpy as np
 
-
-def adjust_exposure(image: np.ndarray, exposure: float = 0.0) -> np.ndarray:
-    factor = 2.0 ** exposure
-    return np.clip(image * factor, 0.0, 1.0)
-
-
-def normalize_exposure_midtone(image: np.ndarray, scene_mask: np.ndarray | None = None) -> np.ndarray:
-    gray = np.dot(image[..., :3], [0.299, 0.587, 0.114])
-
-    valid = gray[scene_mask] if scene_mask is not None and scene_mask.shape == gray.shape and np.any(scene_mask) else gray.reshape(-1)
-    if valid.size < 100:
-        return image
-
-    mid = np.percentile(valid, 50)
-    gain = 0.50 / (mid + 1e-6)
-    gain = np.clip(gain, 0.70, 1.80)
-
-    return np.clip(image * gain, 0.0, 1.0)
-
-
-def apply_levels(image: np.ndarray, black_point: float = 0.0, white_point: float = 1.0) -> np.ndarray:
-    white_point = max(white_point, black_point + 1e-5)
-    out = (image - black_point) / (white_point - black_point)
-    return np.clip(out, 0.0, 1.0)
-
-
-def adjust_contrast(image: np.ndarray, contrast: float = 0.0) -> np.ndarray:
-    factor = 1.0 + contrast
-    midpoint = 0.5
-    out = (image - midpoint) * factor + midpoint
-    return np.clip(out, 0.0, 1.0)
-
-
-def soft_highlight_rolloff(image: np.ndarray, strength: float = 0.15) -> np.ndarray:
-    if strength <= 0:
-        return image
-
-    x = np.clip(image, 0.0, 1.0)
-    mask = np.clip((x - 0.7) / 0.3, 0.0, 1.0)
-    compressed = 0.7 + (x - 0.7) * (1.0 - strength * mask)
-    out = np.where(x > 0.7, compressed, x)
-    return np.clip(out, 0.0, 1.0)
+from scanner.models.image_job import ImageJob
+from scanner.core.image_io import read_image, resize_to_max_edge
+from scanner.core.transforms import (
+    apply_rotation_and_flips,
+    crop_image,
+    normalized_to_pixel_rect,
+    pixel_to_normalized_rect,
+    normalized_point_to_pixel,
+)
+from scanner.core.frame_detector import (
+    detect_film_frame,
+    estimate_scene_mask,
+    estimate_border_mask,
+)
+from scanner.core.negative import invert_color_negative, invert_bw_negative
+from scanner.core.color import (
+    auto_balance,
+    apply_gray_picker_balance,
+    apply_temp_tint,
+    adjust_saturation,
+)
+from scanner.core.tone import (
+    adjust_exposure,
+    normalize_exposure_midtone,
+    apply_levels,
+    adjust_contrast,
+    soft_highlight_rolloff,
+    protect_extremes,
+    suppress_outer_area,
+    apply_filmic_contrast,
+)
+from scanner.core.sharpening import unsharp_mask
+from scanner.core.histogram import compute_rgb_histograms
 
 
-def protect_extremes(image: np.ndarray) -> np.ndarray:
-    gray = np.dot(image[..., :3], [0.299, 0.587, 0.114])
+def resolve_crop_for_job(job: ImageJob, image: np.ndarray) -> tuple[int, int, int, int] | None:
+    if job.normalized_crop_rect is not None:
+        return normalized_to_pixel_rect(job.normalized_crop_rect, image.shape)
 
-    shadow_mask = gray < 0.1
-    highlight_mask = gray > 0.9
+    if job.auto_crop_enabled:
+        detected = detect_film_frame(image)
+        if detected is not None:
+            job.normalized_crop_rect = pixel_to_normalized_rect(detected, image.shape)
+            return detected
 
-    out = image.copy()
+    return None
 
-    for c in range(3):
-        out[:, :, c][shadow_mask] = (
-            out[:, :, c][shadow_mask] * 0.80 +
-            gray[shadow_mask] * 0.20
+
+def process_image(job: ImageJob, preview: bool = False) -> np.ndarray:
+    image = read_image(job.source_path)
+
+    if preview:
+        image = resize_to_max_edge(image, 1600)
+
+    image = apply_rotation_and_flips(image, job.rotation, job.flip_h, job.flip_v)
+
+    crop_rect = resolve_crop_for_job(job, image)
+    image = crop_image(image, crop_rect)
+
+    # Scene-only stats: trust center, ignore edges
+    scene_mask = estimate_scene_mask(image, crop_rect=None, keep_fraction=0.65)
+    border_mask = estimate_border_mask(image, scene_mask)
+
+    if job.film_type == "color_negative":
+        image = invert_color_negative(
+            image,
+            border_hint=True,
+            scene_mask=scene_mask,
+            preset_name=job.preset_name,
         )
-        out[:, :, c][highlight_mask] = (
-            out[:, :, c][highlight_mask] * 0.80 +
-            gray[highlight_mask] * 0.20
-        )
+        image = normalize_exposure_midtone(image, scene_mask)
+        image = auto_balance(image, scene_mask)
 
-    return np.clip(out, 0.0, 1.0)
+    elif job.film_type == "bw_negative":
+        image = invert_bw_negative(image)
+        image = normalize_exposure_midtone(image, scene_mask)
 
+    elif job.film_type == "slide_positive":
+        image = normalize_exposure_midtone(image, scene_mask)
+        image = auto_balance(image, scene_mask)
 
-def suppress_outer_area(
-    image: np.ndarray,
-    border_mask: np.ndarray | None = None,
-) -> np.ndarray:
-    """
-    Border is never trusted. When shown, keep it visually quiet.
-    """
-    if border_mask is None or not np.any(border_mask):
-        return image
+    gray_point = normalized_point_to_pixel(job.gray_pick_normalized, image.shape)
+    image = apply_gray_picker_balance(image, gray_point)
 
-    out = image.copy()
-    gray = np.mean(out, axis=2, keepdims=True)
-    subdued = gray + (out - gray) * 0.25
-    subdued = soft_highlight_rolloff(subdued, 0.40)
-    out[border_mask] = subdued[border_mask]
-    return np.clip(out, 0.0, 1.0)
+    image = adjust_exposure(image, job.exposure)
+    image = apply_temp_tint(image, job.temp, job.tint)
+    image = apply_levels(image, job.black_point, job.white_point)
+    image = adjust_contrast(image, job.contrast)
+    image = protect_extremes(image)
+    image = soft_highlight_rolloff(image, 0.12)
+    image = apply_filmic_contrast(image)
+    image = adjust_saturation(image, job.saturation)
+    image = unsharp_mask(image, job.sharpness)
 
+    # Border never drives the image. If shown, keep it subdued.
+    if job.include_border:
+        image = suppress_outer_area(image, border_mask)
+    else:
+        if np.any(border_mask):
+            gray = np.mean(image, axis=2, keepdims=True).repeat(3, axis=2)
+            image[border_mask] = gray[border_mask] * 0.98
 
-def apply_filmic_contrast(image: np.ndarray) -> np.ndarray:
-    image = np.power(np.clip(image, 0.0, 1.0), 0.97)
-    image = image * image * (3.0 - 2.0 * image)
     return np.clip(image, 0.0, 1.0)
+
+
+def process_image_and_histogram(
+    job: ImageJob,
+    preview: bool = False,
+) -> tuple[np.ndarray, tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    image = process_image(job, preview=preview)
+    hist = compute_rgb_histograms(image)
+    return image, hist
