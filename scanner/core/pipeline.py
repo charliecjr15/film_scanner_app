@@ -18,6 +18,7 @@ from scanner.core.frame_detector import (
 from scanner.core.negative import invert_color_negative, invert_bw_negative
 from scanner.core.color import (
     auto_balance,
+    apply_filmic_color_balance,
     apply_gray_picker_balance,
     apply_temp_tint,
     adjust_saturation,
@@ -59,9 +60,7 @@ def process_image(job: ImageJob, preview: bool = False) -> np.ndarray:
     crop_rect = resolve_crop_for_job(job, image)
     image = crop_image(image, crop_rect)
 
-    # IMPORTANT:
-    # scene_mask is for STATISTICS ONLY.
-    # It must not be used to visually suppress the outer image.
+    # Scene statistics only
     scene_mask = estimate_scene_mask(image, crop_rect=None, keep_fraction=0.60)
 
     if job.film_type == "color_negative":
@@ -71,7 +70,12 @@ def process_image(job: ImageJob, preview: bool = False) -> np.ndarray:
             scene_mask=scene_mask,
             preset_name=job.preset_name,
         )
+
         image = normalize_exposure_midtone(image, scene_mask)
+
+        # NEW: filmic midtone color reconstruction
+        image = apply_filmic_color_balance(image, scene_mask)
+
         image = auto_balance(image, scene_mask)
 
     elif job.film_type == "bw_negative":

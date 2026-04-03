@@ -24,6 +24,63 @@ def auto_balance(image: np.ndarray, scene_mask: np.ndarray | None = None) -> np.
     return np.clip(out, 0.0, 1.0)
 
 
+def apply_filmic_color_balance(
+    image: np.ndarray,
+    scene_mask: np.ndarray | None = None,
+) -> np.ndarray:
+    """
+    Midtone-focused filmic color rebalance.
+
+    Purpose:
+    - reduce green/cyan dominance after inversion
+    - warm up building/skin-like midtones slightly
+    - keep highlights and shadows more stable
+    - move the rendering toward a more photographic feel
+    """
+
+    sample = image[scene_mask] if scene_mask is not None and np.any(scene_mask) else image.reshape(-1, 3)
+    if sample.shape[0] < 128:
+        return image
+
+    luma = np.mean(sample, axis=1)
+    mid_mask = (luma > 0.25) & (luma < 0.75)
+    mids = sample[mid_mask] if np.any(mid_mask) else sample
+
+    means = np.mean(mids, axis=0).astype(np.float32)
+
+    # Encourage a warmer balance:
+    # - slightly lift red
+    # - hold green as reference
+    # - slightly reduce blue
+    target = np.array([
+        means[1] * 1.03,   # red slightly warmer
+        means[1] * 1.00,   # green reference
+        means[1] * 0.94,   # blue reduced
+    ], dtype=np.float32)
+
+    gains = target / np.maximum(means, 1e-5)
+    gains = np.clip(gains, 0.90, 1.12)
+
+    luma_full = np.mean(image, axis=2, keepdims=True)
+
+    # Strongest effect in midtones, weaker in shadows/highlights
+    shadows_to_mids = np.clip((luma_full - 0.18) / 0.22, 0.0, 1.0)
+    mids_to_highs = 1.0 - np.clip((luma_full - 0.72) / 0.20, 0.0, 1.0)
+    mid_weight = shadows_to_mids * mids_to_highs
+
+    out = image * (1.0 + (gains.reshape(1, 1, 3) - 1.0) * mid_weight)
+
+    # Gentle cross-channel warmth for midtones only
+    warm_bias = np.concatenate([
+        mid_weight * 0.015,   # red lift
+        np.zeros_like(mid_weight),
+        -mid_weight * 0.020,  # blue reduction
+    ], axis=2)
+    out = out + warm_bias
+
+    return np.clip(out, 0.0, 1.0)
+
+
 def apply_gray_picker_balance(image: np.ndarray, point: tuple[int, int] | None) -> np.ndarray:
     if point is None:
         return image
