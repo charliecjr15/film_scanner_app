@@ -60,22 +60,18 @@ def process_image(job: ImageJob, preview: bool = False) -> np.ndarray:
     crop_rect = resolve_crop_for_job(job, image)
     image = crop_image(image, crop_rect)
 
-    # Scene statistics only
+    # Always compute scene stats from the central scene, not from film borders.
     scene_mask = estimate_scene_mask(image, crop_rect=None, keep_fraction=0.60)
 
     if job.film_type == "color_negative":
         image = invert_color_negative(
             image,
-            border_hint=False,
+            border_hint=bool(job.include_border),
             scene_mask=scene_mask,
             preset_name=job.preset_name,
         )
-
         image = normalize_exposure_midtone(image, scene_mask)
-
-        # NEW: filmic midtone color reconstruction
         image = apply_filmic_color_balance(image, scene_mask)
-
         image = auto_balance(image, scene_mask)
 
     elif job.film_type == "bw_negative":
@@ -94,7 +90,7 @@ def process_image(job: ImageJob, preview: bool = False) -> np.ndarray:
     image = apply_levels(image, job.black_point, job.white_point)
     image = adjust_contrast(image, job.contrast)
     image = protect_extremes(image)
-    image = soft_highlight_rolloff(image, 0.10)
+    image = soft_highlight_rolloff(image, 0.12)
     image = apply_filmic_contrast(image)
     image = adjust_saturation(image, job.saturation)
     image = unsharp_mask(image, job.sharpness)
