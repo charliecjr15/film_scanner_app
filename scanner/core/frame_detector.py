@@ -51,25 +51,37 @@ def detect_film_frame(image: np.ndarray) -> Optional[CropRect]:
     return best
 
 
-def build_center_mask(
+def build_stats_mask(
     image: np.ndarray,
-    keep_fraction: float = 0.60,
+    keep_fraction: float = 0.55,
 ) -> np.ndarray:
+    """
+    Edge-aware stats mask:
+    - rejects outer border
+    - rejects brightest and darkest edge zones
+    - keeps central scene region
+    """
     h, w = image.shape[:2]
-    keep_fraction = float(np.clip(keep_fraction, 0.30, 0.90))
+    keep_fraction = float(np.clip(keep_fraction, 0.35, 0.85))
 
     margin_y = int(h * (1.0 - keep_fraction) / 2.0)
     margin_x = int(w * (1.0 - keep_fraction) / 2.0)
 
     mask = np.zeros((h, w), dtype=bool)
     mask[margin_y:h - margin_y, margin_x:w - margin_x] = True
-    return mask
+
+    gray = np.mean(image, axis=2)
+    lo = np.percentile(gray[mask], 3.0) if np.any(mask) else np.percentile(gray, 3.0)
+    hi = np.percentile(gray[mask], 97.0) if np.any(mask) else np.percentile(gray, 97.0)
+
+    tonal_mask = (gray >= lo) & (gray <= hi)
+    return mask & tonal_mask
 
 
 def estimate_scene_mask(
     image: np.ndarray,
     crop_rect: CropRect | None = None,
-    keep_fraction: float = 0.60,
+    keep_fraction: float = 0.55,
 ) -> np.ndarray:
     if crop_rect is None:
         crop_rect = detect_film_frame(image)
@@ -77,49 +89,12 @@ def estimate_scene_mask(
     h, w = image.shape[:2]
 
     if crop_rect is None:
-        return build_center_mask(image, keep_fraction=keep_fraction)
+        return build_stats_mask(image, keep_fraction=keep_fraction)
 
     x, y, cw, ch = crop_rect
     roi = image[y:y + ch, x:x + cw]
-    roi_mask = build_center_mask(roi, keep_fraction=keep_fraction)
+    roi_mask = build_stats_mask(roi, keep_fraction=keep_fraction)
 
     full_mask = np.zeros((h, w), dtype=bool)
     full_mask[y:y + ch, x:x + cw] = roi_mask
     return full_mask
-
-
-def build_border_mask(
-    image: np.ndarray,
-    thickness_ratio: float = 0.08,
-) -> np.ndarray:
-    """Create a ring mask around the image edges for film-base estimation."""
-    h, w = image.shape[:2]
-    thickness_ratio = float(np.clip(thickness_ratio, 0.02, 0.18))
-    t = max(2, int(min(h, w) * thickness_ratio))
-
-    mask = np.zeros((h, w), dtype=bool)
-    mask[:t, :] = True
-    mask[-t:, :] = True
-    mask[:, :t] = True
-    mask[:, -t:] = True
-    return mask
-
-
-def build_outer_crop_border_mask(
-    image: np.ndarray,
-    inset_ratio: float = 0.10,
-) -> np.ndarray:
-    """Build a ring mask around the current cropped image content.
-
-    This is useful when the image has already been cropped to the film frame and the
-    outer edge still contains useful rebate/mask information.
-    """
-    h, w = image.shape[:2]
-    inset_ratio = float(np.clip(inset_ratio, 0.03, 0.22))
-    inset_y = max(2, int(h * inset_ratio))
-    inset_x = max(2, int(w * inset_ratio))
-
-    outer = np.ones((h, w), dtype=bool)
-    inner = np.zeros((h, w), dtype=bool)
-    inner[inset_y:h - inset_y, inset_x:w - inset_x] = True
-    return outer & ~inner

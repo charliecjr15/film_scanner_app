@@ -1,268 +1,242 @@
-# 🎞️ Film Scanner App
-
-A desktop film scanning workflow app built with **Python** and **PySide6** for converting camera-captured film frames into usable positive images with a fast preview-to-export workflow.
-
-The app is designed around one simple loop:
-
-**Import → Auto-correct → Adjust → Compare → Export**
-
-It is built for users who want a strong automatic starting point, then only a few manual tweaks before export.
-
----
-
-## Screenshots
-
-### Film Scanner V5
-
-![Film Scanner V5 UI](assets/film-scanner-v5-ui.png)
-
-### Negative Lab Pro Reference Comparison
-
-![Negative Lab Pro Reference](assets/negative-lab-pro-reference.png)
-
----
+# Film Scanner App (Current Version)
 
 ## Overview
 
-Film Scanner App is a desktop tool for working with camera-scanned film. It supports negative and positive workflows, automatic frame detection, color balancing, manual correction controls, and export to standard image formats.
+Film Scanner App is a desktop application designed to convert camera-scanned film negatives into positive images. It provides a GUI-based workflow for previewing, processing, and exporting scanned film frames.
 
-The current repository includes a queue-driven UI, preview and export workers, a modular core processing pipeline, stock-aware presets, and configurable defaults.
+This version represents an **experimental pipeline** focused on automated negative inversion and batch processing, with early-stage attempts at film-like color rendering.
 
 ---
 
-## Current Feature Set
+## ⚠️ Current State (Important)
 
-### Core workflow
+This version is **not production-ready** and does **not match lab-quality tools (e.g., Negative Lab Pro)**.
 
-- Import individual image files or entire folders
-- Queue-based workflow for multiple frames
-- Fast preview rendering
-- Export current image or batch export the full queue
+Known characteristics:
 
-### Film support
+* Inconsistent color reproduction across frames
+* Weak handling of orange mask removal
+* Border/perforation contamination affecting results
+* Over-reliance on per-frame auto-adjustments
+* Limited roll-level consistency
 
-- Color negative conversion
-- Black and white negative conversion
-- Slide positive workflow
+This README documents the system as it exists today.
 
-### Auto-correction and processing
+---
 
-- Automatic frame detection and auto crop
-- Optional border inclusion
-- Content-mask estimation for safer image statistics
-- Midtone-based exposure normalization
-- Automatic color balancing
-- Gray picker for neutral reference correction
-- Filmic contrast finish
-- Highlight and shadow protection
-- Sharpening
+## Features
 
-### Stock-aware negative presets
+### Core Functionality
 
-- Balanced
-- Neutral Lab
-- Kodak Gold
-- Kodak Portra 400
-- Fuji 400H
-- CineStill 800T
+* Load and preview scanned film images
+* Batch processing workflow
+* Negative → positive conversion
+* Histogram generation
+* Image export (TIFF/JPEG)
 
-### Color management
+### UI Components
 
-- Standard images with embedded ICC profiles are converted into the working space
-- RAW files are developed into sRGB
-- Working pipeline is managed in sRGB
-- JPEG and TIFF exports embed an sRGB ICC profile
+* Main preview window
+* Film controls panel
+* Batch queue handling
+* Export controls
 
-### User controls
+### Processing Pipeline (Current)
 
-- Film type
-- Stock / preset selection
-- Exposure
-- Temperature
-- Tint
-- Contrast
-- Saturation
-- Black point
-- White point
-- Sharpness
-- Rotation
-- Manual crop
-- Gray picker
-
-### Output
-
-- JPEG export
-- TIFF export
-- Embedded sRGB ICC profile in exported files
+1. Image load (assumed linear or near-linear input)
+2. Frame detection (basic / partial)
+3. Negative inversion
+4. Color balancing (auto-based)
+5. Tone adjustments
+6. Output rendering
 
 ---
 
 ## Project Structure
 
-```text
+```
 film_scanner_app/
-├── .gitignore
-├── README.md
+│
 ├── main.py
-├── requirements.txt
-├── config/
-│   └── default_settings.json
-└── scanner/
-    ├── app_controller.py
-    ├── settings_manager.py
-    ├── core/
-    │   ├── color.py
-    │   ├── frame_detector.py
-    │   ├── histogram.py
-    │   ├── image_io.py
-    │   ├── negative.py
-    │   ├── pipeline.py
-    │   ├── sharpening.py
-    │   ├── tone.py
-    │   ├── transforms.py
-    │   └── utils.py
-    ├── models/
-    │   ├── document_state.py
-    │   └── image_job.py
-    ├── ui/
-    │   ├── film_controls.py
-    │   ├── histogram_widget.py
-    │   ├── main_window.py
-    │   ├── preview_widget.py
-    │   └── queue_panel.py
-    └── workers/
-        ├── export_worker.py
-        └── preview_worker.py
+├── scanner/
+│   ├── app_controller.py
+│   │
+│   ├── core/
+│   │   ├── pipeline.py
+│   │   ├── negative.py
+│   │   ├── frame_detector.py
+│   │
+│   ├── workers/
+│   │   ├── preview_worker.py
+│   │
+│   ├── ui/
+│   │   ├── main_window.py
+│   │   ├── film_controls.py
+│   │
+│   └── utils/
+│
+└── assets/
 ```
 
 ---
 
-## Requirements
+## Key Modules
 
-- Python 3.11+ recommended
-- macOS, Windows, or Linux
-- A virtual environment is recommended
+### `pipeline.py`
 
----
+Main processing pipeline:
 
-## Installation
+* Coordinates image transformation
+* Calls frame detection and negative conversion
+* Produces final preview/output
 
-Clone the repository:
+### `negative.py`
 
-```bash
-git clone https://github.com/charliecjr15/film_scanner_app.git
-cd film_scanner_app
-```
+Handles:
 
-Create and activate a virtual environment.
+* Negative inversion logic
+* Color balancing attempts
+* Preset-based adjustments (incomplete)
 
-### macOS / Linux
+### `frame_detector.py`
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
+Responsible for:
 
-### Windows PowerShell
+* Detecting film frame boundaries
+* (Currently unreliable for complex borders/perforations)
 
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-```
+### `preview_worker.py`
 
-Install dependencies:
+* Runs processing in background thread
+* Prevents UI blocking during preview
 
-```bash
-pip install -r requirements.txt
-```
+### UI Layer
+
+* `main_window.py`: Main application window
+* `film_controls.py`: Controls for processing parameters
 
 ---
 
-## Run the App
+## Current Limitations
+
+### 1. Color Accuracy
+
+* No true film stock modeling
+* No roll-level calibration
+* Orange mask removal is unstable
+
+### 2. Frame Detection
+
+* Borders and perforations bleed into analysis
+* Light leaks affect exposure calculations
+
+### 3. Processing Strategy
+
+* Per-frame auto adjustments cause inconsistency
+* No shared calibration between images
+
+### 4. Highlight Handling
+
+* Clipping and washed highlights in bright areas
+
+### 5. Shadow Handling
+
+* Loss of detail or muddy tones
+
+---
+
+## Known Errors
+
+Common issues encountered:
+
+### Import Errors
+
+```
+ImportError: cannot import name 'detect_film_frame'
+ImportError: cannot import name 'list_negative_presets'
+```
+
+Cause:
+
+* Missing or outdated functions in core modules
+
+---
+
+## Dependencies
+
+* Python 3.10+
+* OpenCV
+* NumPy
+* PyQt / PySide (depending on build)
+
+---
+
+## Usage
+
+Run the app:
 
 ```bash
 python main.py
 ```
 
----
+Typical workflow:
 
-## Basic Workflow
-
-1. Add image files or a folder.
-2. Select the correct film type:
-   - `color_negative`
-   - `bw_negative`
-   - `slide_positive`
-3. Choose a stock preset if you are working with color negative film.
-4. Let the app generate a preview.
-5. Fine-tune with the controls if needed.
-6. Use compare and preview tools in the interface.
-7. Export the current image or export the full queue.
+1. Load images
+2. Preview conversion
+3. Adjust controls (limited effect)
+4. Export results
 
 ---
 
-## Processing Pipeline Summary
+## Design Philosophy (Current Version)
 
-The current processing flow is built around a practical scanner-style workflow:
+This version attempts:
 
-1. Read image into the working color space
-2. Apply transforms such as rotation and flips
-3. Detect frame and resolve crop
-4. Estimate content mask
-5. Convert film image
-   - invert negative if needed
-   - apply stock-aware base estimation for color negatives
-6. Normalize exposure around midtones
-7. Auto-balance color
-8. Apply optional gray picker correction
-9. Apply user adjustments
-10. Apply highlight/shadow protection and filmic contrast
-11. Export with embedded output ICC profile
+* Fully automatic negative conversion
+* Minimal user interaction
+* Fast preview feedback
+
+However, this approach leads to:
+
+* Inconsistent results
+* Poor handling of real-world film variations
 
 ---
 
-## Supported Input Formats
+## Future Direction (Planned Rewrite)
 
-Typical standard image support includes:
+The next version will move toward:
 
-- JPEG
-- PNG
-- TIFF
-
-RAW support depends on `rawpy` and the installed LibRaw support. Common RAW extensions may include:
-
-- DNG
-- NEF
-- CR2
-- CR3
-- ARW
-- RAF
-- RW2
-- ORF
-- PEF
-- SRW
-- and others defined in the project
+* Roll-based calibration
+* LUT-based inversion
+* Proper orange mask handling
+* Edge-aware border rejection
+* Film stock profiles
+* Deterministic (non-chaotic) processing
 
 ---
 
-## Current Direction
+## Summary
 
-The current version focuses on:
+This version is:
 
-- faster preview-to-export workflow
-- stronger default auto-correction
-- safer content-aware statistics
-- more practical film conversion controls
+* A working prototype
+* A foundation for UI and workflow
+* Not suitable for final-quality scans
+
+It should be treated as:
+
+> A stepping stone toward a rebuilt, production-quality film scanning engine.
 
 ---
 
-## Notes
+## Author Notes
 
-If you want the screenshots in GitHub to render correctly, add them to your repo in an `assets/` folder using these filenames:
+This project is actively evolving.
+The current implementation highlights the challenges of:
 
-```text
-assets/film-scanner-v5-ui.png
-assets/negative-lab-pro-reference.png
-```
+* Film negative inversion
+* Color science
+* Robust automation
 
-
+A full redesign of the processing pipeline is planned.
